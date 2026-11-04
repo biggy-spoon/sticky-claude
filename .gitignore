@@ -1,0 +1,15 @@
+# ESP-IDF
+firmware/build/
+firmware/sdkconfig
+firmware/sdkconfig.old
+firmware/managed_components/
+firmware/dependencies.lock
+
+# Python
+backend/__pycache__/
+backend/*.pyc
+backend/.venv/
+backend/.env
+
+# OS
+.DS_Store
