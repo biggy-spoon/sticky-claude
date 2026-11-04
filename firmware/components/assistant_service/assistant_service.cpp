@@ -3,7 +3,7 @@
 #include "cJSON.h"
 #include "esp_http_client.h"
 #include "esp_log.h"
-#include "sdkconfig.h"
+#include "settings_service.h"
 
 namespace assistant_service {
 namespace {
@@ -43,8 +43,14 @@ ConverseResult Converse(const uint8_t* wav_bytes, size_t wav_len) {
 
     ResponseBuffer response_buffer;
 
+    const std::string backend_url = settings_service::Get().backend_url;
+    if (backend_url.empty()) {
+        result.error_message = "no backend URL configured";
+        return result;
+    }
+
     esp_http_client_config_t config = {};
-    config.url = CONFIG_STICKY_CLAUDE_BACKEND_URL;
+    config.url = backend_url.c_str();
     config.method = HTTP_METHOD_POST;
     config.timeout_ms = kTimeoutMs;
     config.event_handler = &HttpEventHandler;

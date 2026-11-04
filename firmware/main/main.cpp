@@ -3,12 +3,14 @@
 #include "assistant_service.h"
 #include "board_config.h"
 #include "button_service.h"
+#include "captive_portal.h"
 #include "epaper_display.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "nvs_flash.h"
 #include "recording_service.h"
+#include "settings_service.h"
 #include "wifi_service.h"
 
 namespace {
@@ -93,6 +95,16 @@ extern "C" void app_main() {
     }
     ESP_ERROR_CHECK(err);
 
+    ESP_ERROR_CHECK(settings_service::Init());
+
+    if (!settings_service::IsConfigured()) {
+        ESP_LOGI(kTag, "not configured yet, starting setup portal");
+        ESP_ERROR_CHECK(captive_portal::Run());
+        // Run() only returns on failure to start; the portal itself reboots
+        // the device once setup completes. Nothing else to do here.
+        return;
+    }
+
     ESP_ERROR_CHECK(epaper_display::Init());
     ESP_ERROR_CHECK(recording_service::Init());
     ESP_ERROR_CHECK(button_service::Init());
@@ -102,8 +114,9 @@ extern "C" void app_main() {
 
     button_service::SetHandlers(&OnPressStart, &OnPressEnd, nullptr);
 
+    const settings_service::Settings settings = settings_service::Get();
     ESP_LOGI(kTag, "connecting to WiFi...");
-    if (wifi_service::ConnectBlocking() != ESP_OK) {
+    if (wifi_service::ConnectStaBlocking(settings.wifi_ssid, settings.wifi_password) != ESP_OK) {
         ESP_LOGE(kTag, "WiFi connect failed; recording will work but uploads will fail");
     }
 
