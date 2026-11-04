@@ -53,8 +53,8 @@ esp_err_t Init() {
 
     i2s_pdm_rx_config_t pdm_cfg = {
         .clk_cfg = I2S_PDM_RX_CLK_DEFAULT_CONFIG(kSampleRateHz),
-        .slot_cfg = I2S_PDM_RX_SLOT_PCM_FMT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT,
-                                                           I2S_SLOT_MODE_MONO),
+        .slot_cfg = I2S_PDM_RX_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT,
+                                                   I2S_SLOT_MODE_MONO),
         .gpio_cfg = {
             .clk = BOARD_PDM_CLK_PIN,
             .din = BOARD_PDM_DATA_PIN,
