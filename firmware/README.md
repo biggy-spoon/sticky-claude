@@ -8,9 +8,12 @@ back as JSON.
 ## Build
 
 Requires [ESP-IDF](https://docs.espressif.com/projects/esp-idf/en/stable/esp32s3/get-started/index.html)
-v5.x (this was written against the v5 I2S PDM RX API). Not built or
-flashed in this session — there was no ESP-IDF toolchain available to verify
-it compiles. Treat this as a first draft that needs real bring-up.
+v5.3.x (this was written against, and `idf.py build` verified against, v5.3's
+I2S PDM RX API). `idf.py build` completes cleanly as of this writing —
+bootloader, partition table, and app binary all generate with flash to
+spare. It has **not** been flashed to real hardware or run on the device,
+so bring-up issues (wrong pin, display not lighting up, mic silent) are
+still expected; only compile-time correctness has been checked.
 
 ```bash
 cd firmware

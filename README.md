@@ -20,11 +20,14 @@ for a reply, which comes back to the device to display.
 
 ## Status
 
-Early scaffold, not yet flashed or run end-to-end. See
-`firmware/README.md`'s "Known gaps" for what's stubbed vs. real, in
-particular: **text rendering on the display isn't implemented yet** (no
-font wired up), and the ePaper panel's init sequence hasn't been verified
-against real hardware.
+The backend is working end to end, verified with a real Anthropic key:
+WAV in, Claude reply out. The firmware builds cleanly with ESP-IDF
+(`idf.py build` produces a flashable image) but has not been flashed to
+or run on real hardware yet. See `firmware/README.md`'s "Known gaps" for
+what's stubbed vs. real, in particular: **text rendering on the display
+isn't implemented yet** (no font wired up), and the ePaper panel's
+init sequence has only been compile-checked, not verified against a real
+panel.
 
 ## License
 
