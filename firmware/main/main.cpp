@@ -1,7 +1,6 @@
 #include <cstdlib>
 
 #include "assistant_service.h"
-#include "board_config.h"
 #include "button_service.h"
 #include "captive_portal.h"
 #include "epaper_display.h"
@@ -11,6 +10,7 @@
 #include "nvs_flash.h"
 #include "recording_service.h"
 #include "settings_service.h"
+#include "ui.h"
 #include "wifi_service.h"
 
 namespace {
@@ -20,26 +20,12 @@ constexpr uint32_t kMinHoldMs = 250;  // ignore accidental taps shorter than thi
 constexpr uint32_t kAssistantTaskStackWords = 6144;
 
 TaskHandle_t s_assistant_task = nullptr;
-
-// Crude "status bar" feedback until a font is wired up (see
-// firmware/README.md "Known gaps"): draws a black bar across the top of the
-// screen while the assistant is busy, clears it when done. Not a
-// replacement for rendering the actual reply text.
-void ShowBusyBar(bool busy) {
-    epaper_display::Clear(false);
-    if (busy) {
-        for (int y = 0; y < 20; ++y) {
-            for (int x = 0; x < BOARD_EPD_WIDTH; ++x) {
-                epaper_display::SetPixel(x, y, true);
-            }
-        }
-    }
-    epaper_display::FullRefresh();
-}
+bool s_wifi_connected = false;
 
 void OnPressStart(void*) {
     ESP_LOGI(kTag, "recording...");
     recording_service::StartCapture();
+    ui::ShowRecording();
 }
 
 void OnPressEnd(uint32_t held_ms, void*) {
@@ -49,6 +35,7 @@ void OnPressEnd(uint32_t held_ms, void*) {
     if (held_ms < kMinHoldMs || sample_count == 0) {
         ESP_LOGI(kTag, "press too short (%lums) or no audio, ignoring",
                  static_cast<unsigned long>(held_ms));
+        ui::ShowIdle(s_wifi_connected);
         return;
     }
 
@@ -67,7 +54,7 @@ void AssistantTask(void*) {
         }
 
         ESP_LOGI(kTag, "sending %u byte clip to backend", static_cast<unsigned>(wav_len));
-        ShowBusyBar(true);
+        ui::ShowThinking();
 
         const assistant_service::ConverseResult result = assistant_service::Converse(wav, wav_len);
         free(wav);
@@ -75,13 +62,12 @@ void AssistantTask(void*) {
         if (result.success) {
             ESP_LOGI(kTag, "transcript=%s", result.transcript.c_str());
             ESP_LOGI(kTag, "reply=%s", result.reply.c_str());
+            ui::ShowReply(result.transcript, result.reply);
         } else {
             ESP_LOGW(kTag, "converse failed: http=%d error=%s", result.http_status,
                      result.error_message.c_str());
+            ui::ShowError(result.error_message.empty() ? "Unknown error" : result.error_message);
         }
-
-        // TODO: render result.reply as text once a font is wired up.
-        ShowBusyBar(false);
     }
 }
 
@@ -106,6 +92,7 @@ extern "C" void app_main() {
     }
 
     ESP_ERROR_CHECK(epaper_display::Init());
+    ESP_ERROR_CHECK(ui::Init());
     ESP_ERROR_CHECK(recording_service::Init());
     ESP_ERROR_CHECK(button_service::Init());
 
@@ -116,9 +103,12 @@ extern "C" void app_main() {
 
     const settings_service::Settings settings = settings_service::Get();
     ESP_LOGI(kTag, "connecting to WiFi...");
-    if (wifi_service::ConnectStaBlocking(settings.wifi_ssid, settings.wifi_password) != ESP_OK) {
+    s_wifi_connected =
+        wifi_service::ConnectStaBlocking(settings.wifi_ssid, settings.wifi_password) == ESP_OK;
+    if (!s_wifi_connected) {
         ESP_LOGE(kTag, "WiFi connect failed; recording will work but uploads will fail");
     }
 
+    ui::ShowIdle(s_wifi_connected);
     ESP_LOGI(kTag, "ready: hold the AI button to record");
 }

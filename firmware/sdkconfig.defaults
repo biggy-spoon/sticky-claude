@@ -4,6 +4,16 @@ CONFIG_IDF_TARGET="esp32s3"
 CONFIG_SPIRAM=y
 CONFIG_SPIRAM_MODE_OCT=y
 CONFIG_SPIRAM_SPEED_80M=y
-CONFIG_ESP32S3_SPIRAM_SUPPORT=y
 
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
+
+# LVGL: the type sizes used across ui.cpp's screens, beyond the default
+# Montserrat 14.
+CONFIG_LV_FONT_MONTSERRAT_16=y
+CONFIG_LV_FONT_MONTSERRAT_20=y
+CONFIG_LV_FONT_MONTSERRAT_28=y
+
+# LVGL + the extra fonts push the binary past the default 1MB app
+# partition (observed ~1.23MB) -- use the larger single-app scheme
+# (1500K) instead of a from-scratch custom partition table.
+CONFIG_PARTITION_TABLE_SINGLE_APP_LARGE=y
