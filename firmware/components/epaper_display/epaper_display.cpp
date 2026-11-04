@@ -1,5 +1,6 @@
 #include "epaper_display.h"
 
+#include <algorithm>
 #include <cstring>
 
 #include "board_config.h"
@@ -36,14 +37,26 @@ uint8_t* s_framebuffer = nullptr;  // 1bpp, BOARD_EPD_BUFFER_LEN bytes, 1 = whit
 
 void SetDc(bool data) { gpio_set_level(BOARD_EPD_DC_PIN, data ? 1 : 0); }
 
+// The SPI DMA engine caps a single transaction at SPI_LL_DMA_MAX_BIT_LEN
+// (32768 bytes on ESP32-S3) -- confirmed on real hardware, where sending the
+// full ~48000-byte framebuffer in one shot failed with "txdata transfer >
+// hardware max supported len". Chunk anything larger.
+constexpr size_t kMaxSpiChunkBytes = 4096;
+
 esp_err_t SpiSend(const uint8_t* data, size_t len) {
-    if (len == 0) {
-        return ESP_OK;
+    size_t offset = 0;
+    while (offset < len) {
+        const size_t chunk_len = std::min(kMaxSpiChunkBytes, len - offset);
+        spi_transaction_t transaction = {};
+        transaction.length = chunk_len * 8;
+        transaction.tx_buffer = data + offset;
+        const esp_err_t err = spi_device_transmit(s_spi, &transaction);
+        if (err != ESP_OK) {
+            return err;
+        }
+        offset += chunk_len;
     }
-    spi_transaction_t transaction = {};
-    transaction.length = len * 8;
-    transaction.tx_buffer = data;
-    return spi_device_transmit(s_spi, &transaction);
+    return ESP_OK;
 }
 
 esp_err_t SendCommand(uint8_t command) {
