@@ -8,6 +8,7 @@ import io
 import logging
 import os
 
+import anthropic
 from anthropic import Anthropic
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
@@ -75,11 +76,20 @@ async def converse(request: Request) -> JSONResponse:
     if len(audio_bytes) > MAX_AUDIO_BYTES:
         raise HTTPException(status_code=413, detail="Audio clip too large")
 
-    transcript = _transcribe(audio_bytes)
+    try:
+        transcript = _transcribe(audio_bytes)
+    except Exception as exc:
+        log.exception("Transcription failed")
+        raise HTTPException(status_code=400, detail=f"Could not process audio: {exc}") from exc
     if not transcript.strip():
         raise HTTPException(status_code=422, detail="Could not transcribe any speech")
 
-    reply = _ask_claude(transcript)
+    try:
+        reply = _ask_claude(transcript)
+    except anthropic.APIError as exc:
+        log.exception("Claude request failed")
+        raise HTTPException(status_code=502, detail=f"Claude request failed: {exc}") from exc
+
     log.info("transcript=%r reply=%r", transcript, reply)
     return JSONResponse({"transcript": transcript, "reply": reply})
 
