@@ -5,11 +5,16 @@
 - SoC: ESP32-S3R8 (dual-core, up to 240MHz, WiFi 4 + BLE 5.0), 8MB PSRAM, 32MB flash
 - Display: 3.97" monochrome ePaper, 800x480, SSD1677 controller, SPI
 - Audio: single PDM microphone (no speaker — this device is **text-out only**)
-- AI/record button is the long-press trigger (push-to-talk). It's
-  physically the same pin as the device's power button, which has its
-  own hardware-level long-hold behavior independent of firmware — keep
-  holds in the roughly 0.3-3 second range; much longer holds can trigger
-  a hardware power cycle unrelated to recording.
+- Three physical buttons: AI (GPIO4, long-press = push-to-talk, short
+  tap = confirm/toggle on a device-view screen), Up (GPIO5), and Down
+  (GPIO6) -- Up/Down page through plugin device-views. The AI button's
+  pin is physically shared with the device's power button, which has
+  its own hardware-level long-hold behavior independent of firmware —
+  keep holds in the roughly 0.3-3 second range; much longer holds can
+  trigger a hardware power cycle unrelated to recording. Up/Down were
+  confirmed from Seeed's hardware-overview docs and an independent
+  review rather than from testing a real device -- see
+  `firmware/README.md` → "Known gaps".
 
 Pin map lives in `firmware/components/board/include/board_config.h`,
 confirmed against the
@@ -135,12 +140,26 @@ repository is MIT.
   plugin's actual code — installing one is still the manual copy-into-
   `plugins/`-and-restart step above; the hub only solves discovery.
 - `dashboard.html` + the `/api/*` routes in `app.py` — a single
-  dependency-free HTML/JS page served at `/dashboard`. Settings forms are
-  built client-side from each plugin's schema; a plugin-specific data
-  view (calendar's "Upcoming events", todo's open/done lists) is the one
-  place the dashboard still has to know a plugin by name rather than
-  purely by schema. No authentication — same trust model as the device's
-  own setup portal, meant for the home LAN only.
+  dependency-free HTML/JS page served at `/dashboard` (tabbed: Overview,
+  Plugins, Plugin hub, History). Settings forms are built client-side
+  from each plugin's schema; a plugin-specific data view (calendar's
+  "Upcoming events", todo's open/done lists) is the one place the
+  dashboard still has to know a plugin by name rather than purely by
+  schema. No authentication — same trust model as the device's own setup
+  portal, meant for the home LAN only.
+- `Plugin.device_view()`/`device_action()` + `GET /api/device/views` +
+  `POST /api/plugins/{id}/device-action` — the on-device counterpart to
+  `dashboard_view()`: a plugin's own screen for the ePaper display,
+  paged to with the device's Up/Down buttons (see
+  `firmware/components/device_nav`). Deliberately a small declarative
+  payload (view_type + title + items), the same spirit as
+  `SettingField`, rather than letting a plugin send anything it wants —
+  the firmware only ever renders one of a few known view types, so a
+  plugin (including a third-party one from the plugin hub) can describe
+  a screen but never execute code on the device. `device_action()`
+  handles confirming/toggling a highlighted row (a short tap of the
+  AI button), by the row's id rather than text search since the device
+  has a real id to work with, unlike voice.
 
 ## Open items
 

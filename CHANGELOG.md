@@ -48,6 +48,16 @@ tracked under Unreleased until there's a first stable cut.
   companion [`sticky-claude-plugin-hub`](https://github.com/biggy-spoon/sticky-claude-plugin-hub)
   repo. The hub is metadata only -- it never fetches or runs a plugin's
   code automatically.
+- Dashboard split into tabs (Overview, Plugins, Plugin hub, History)
+  instead of one long scrolling page.
+- On-device plugin views: a new `Plugin.device_view()`/`device_action()`
+  contract lets a plugin describe its own ePaper screen (calendar's
+  upcoming events, todo's open items); the device's previously-unused
+  Up/Down buttons (GPIO5/GPIO6, confirmed from Seeed's hardware-overview
+  docs and an independent review) page through them, and a short tap of
+  the AI button confirms/toggles the highlighted row. `button_service`
+  now polls all three buttons; a new firmware `device_nav` component
+  owns the paging state machine and the backend round-trips.
 
 ### Fixed
 - `epaper_display`'s SSD1677 command sequence, written from generic

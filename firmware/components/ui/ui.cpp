@@ -26,11 +26,15 @@ lv_obj_t* s_screen_recording = nullptr;
 lv_obj_t* s_screen_thinking = nullptr;
 lv_obj_t* s_screen_reply = nullptr;
 lv_obj_t* s_screen_error = nullptr;
+lv_obj_t* s_screen_loading = nullptr;
+lv_obj_t* s_screen_device_view = nullptr;
 
 lv_obj_t* s_idle_status_label = nullptr;
 lv_obj_t* s_reply_transcript_label = nullptr;
 lv_obj_t* s_reply_body_label = nullptr;
 lv_obj_t* s_error_message_label = nullptr;
+lv_obj_t* s_device_view_title = nullptr;
+lv_obj_t* s_device_view_list = nullptr;
 
 void TickTimerCallback(void*) { lv_tick_inc(kTickPeriodMs); }
 
@@ -156,6 +160,33 @@ void BuildErrorScreen() {
     lv_obj_align(s_error_message_label, LV_ALIGN_CENTER, 0, 20);
 }
 
+void BuildLoadingScreen() {
+    s_screen_loading = CreateScreen();
+
+    lv_obj_t* big = AddLabel(s_screen_loading, &lv_font_montserrat_28, LV_LABEL_LONG_WRAP, 0);
+    lv_label_set_text(big, "Loading...");
+    lv_obj_align(big, LV_ALIGN_CENTER, 0, 0);
+}
+
+void BuildDeviceViewScreen() {
+    s_screen_device_view = CreateScreen();
+
+    s_device_view_title = AddLabel(s_screen_device_view, &lv_font_montserrat_20, LV_LABEL_LONG_WRAP,
+                                   kContentWidth);
+    lv_obj_align(s_device_view_title, LV_ALIGN_TOP_MID, 0, 20);
+
+    s_device_view_list = lv_obj_create(s_screen_device_view);
+    lv_obj_set_size(s_device_view_list, kContentWidth, kScreenHeight - 80);
+    lv_obj_align(s_device_view_list, LV_ALIGN_TOP_MID, 0, 56);
+    lv_obj_set_style_border_width(s_device_view_list, 0, 0);
+    lv_obj_set_style_pad_all(s_device_view_list, 0, 0);
+    lv_obj_set_style_bg_opa(s_device_view_list, LV_OPA_TRANSP, 0);
+    lv_obj_set_layout(s_device_view_list, LV_LAYOUT_FLEX);
+    lv_obj_set_flex_flow(s_device_view_list, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(s_device_view_list, 10, 0);
+    lv_obj_clear_flag(s_device_view_list, LV_OBJ_FLAG_SCROLL_ELASTIC);
+}
+
 void ShowScreen(lv_obj_t* screen) {
     ESP_LOGI(kTag, "ShowScreen: loading %p", screen);
     lv_scr_load(screen);
@@ -207,6 +238,8 @@ esp_err_t Init() {
     BuildThinkingScreen();
     BuildReplyScreen();
     BuildErrorScreen();
+    BuildLoadingScreen();
+    BuildDeviceViewScreen();
 
     ESP_LOGI(kTag, "initialized: %dx%d", kScreenWidth, kScreenHeight);
     return ESP_OK;
@@ -230,6 +263,37 @@ void ShowReply(const std::string& transcript, const std::string& reply) {
 void ShowError(const std::string& message) {
     lv_label_set_text(s_error_message_label, message.c_str());
     ShowScreen(s_screen_error);
+}
+
+void ShowLoading() { ShowScreen(s_screen_loading); }
+
+void ShowDeviceView(const std::string& title, const std::vector<DeviceViewRow>& rows) {
+    lv_label_set_text(s_device_view_title, title.c_str());
+    lv_obj_clean(s_device_view_list);
+
+    if (rows.empty()) {
+        lv_obj_t* empty = AddLabel(s_device_view_list, &lv_font_montserrat_16, LV_LABEL_LONG_WRAP,
+                                   kContentWidth);
+        lv_label_set_text(empty, "Nothing here yet.");
+        ShowScreen(s_screen_device_view);
+        return;
+    }
+
+    for (const DeviceViewRow& row : rows) {
+        std::string line = row.checkable ? (row.checked ? "[x] " : "[ ] ") : "- ";
+        line += row.text;
+
+        lv_obj_t* label = AddLabel(s_device_view_list, &lv_font_montserrat_16, LV_LABEL_LONG_WRAP,
+                                   kContentWidth);
+        lv_label_set_text(label, line.c_str());
+        lv_obj_set_style_pad_ver(label, 4, 0);
+        if (row.highlighted) {
+            lv_obj_set_style_bg_opa(label, LV_OPA_COVER, 0);
+            lv_obj_set_style_bg_color(label, lv_color_black(), 0);
+            lv_obj_set_style_text_color(label, lv_color_white(), 0);
+        }
+    }
+    ShowScreen(s_screen_device_view);
 }
 
 }  // namespace ui

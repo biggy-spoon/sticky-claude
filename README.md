@@ -18,6 +18,11 @@ calendar and it actually will.
 
 - **Push-to-talk voice notes**, answered by Claude, shown on the
   device's e-paper display with real typography (not a status bar).
+- **On-device plugin views**: the Up/Down buttons page through each
+  configured plugin's own screen (upcoming calendar events, your todo
+  list) without touching the backend dashboard; a short tap of the AI
+  button confirms/toggles whatever's highlighted (checking off a todo,
+  for instance).
 - **No-recompile setup**: first boot opens a WiFi access point with a
   browser-based setup page for WiFi credentials and your backend's
   address. Settings are saved to the device's flash.

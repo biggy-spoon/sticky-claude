@@ -3,6 +3,7 @@
 #include "assistant_service.h"
 #include "button_service.h"
 #include "captive_portal.h"
+#include "device_nav.h"
 #include "epaper_display.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
@@ -22,23 +23,45 @@ constexpr uint32_t kAssistantTaskStackWords = 6144;
 TaskHandle_t s_assistant_task = nullptr;
 bool s_wifi_connected = false;
 
-void OnPressStart(void*) {
+void OnPressStart(button_service::ButtonId id, void*) {
+    if (id != button_service::ButtonId::kAi) {
+        return;  // Up/Down only act on release -- see OnPressEnd
+    }
+    // Started optimistically; a press short enough to turn out to be a tap
+    // (handled below) just discards this via StopCapture(), same as
+    // before Up/Down existed.
     ESP_LOGI(kTag, "recording...");
     recording_service::StartCapture();
     ui::ShowRecording();
 }
 
-void OnPressEnd(uint32_t held_ms, void*) {
+void OnPressEnd(button_service::ButtonId id, uint32_t held_ms, void*) {
+    if (id == button_service::ButtonId::kUp) {
+        device_nav::OnUp();
+        return;
+    }
+    if (id == button_service::ButtonId::kDown) {
+        device_nav::OnDown();
+        return;
+    }
+
     size_t sample_count = 0;
     recording_service::StopCapture(&sample_count);
 
     if (held_ms < kMinHoldMs || sample_count == 0) {
-        ESP_LOGI(kTag, "press too short (%lums) or no audio, ignoring",
+        // Too short to be an intentional recording -- treat it as a tap:
+        // confirm/toggle whatever's highlighted if a device view is
+        // showing, otherwise just go back to idle like before this
+        // button did double duty.
+        ESP_LOGI(kTag, "press too short (%lums) or no audio, treating as a tap",
                  static_cast<unsigned long>(held_ms));
-        ui::ShowIdle(s_wifi_connected);
+        if (!device_nav::OnConfirm()) {
+            ui::ShowIdle(s_wifi_connected);
+        }
         return;
     }
 
+    device_nav::ResetToHome();
     xTaskNotifyGive(s_assistant_task);
 }
 
@@ -95,6 +118,7 @@ extern "C" void app_main() {
     ESP_ERROR_CHECK(ui::Init());
     ESP_ERROR_CHECK(recording_service::Init());
     ESP_ERROR_CHECK(button_service::Init());
+    ESP_ERROR_CHECK(device_nav::Init());
 
     xTaskCreate(AssistantTask, "assistant", kAssistantTaskStackWords, nullptr, 5,
                 &s_assistant_task);
@@ -110,5 +134,5 @@ extern "C" void app_main() {
     }
 
     ui::ShowIdle(s_wifi_connected);
-    ESP_LOGI(kTag, "ready: hold the AI button to record");
+    ESP_LOGI(kTag, "ready: hold the AI button to record, Up/Down to page through plugin views");
 }
