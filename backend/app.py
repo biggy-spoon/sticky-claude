@@ -20,6 +20,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 from faster_whisper import WhisperModel
 
+import plugin_hub
 import plugins
 import settings
 import storage
@@ -256,3 +257,12 @@ def api_plugin_view(plugin_id: str) -> dict:
     if plugin is None:
         raise HTTPException(status_code=404, detail=f"Unknown plugin: {plugin_id}")
     return plugin.dashboard_view() or {}
+
+
+@app.get("/api/plugin-hub")
+def api_plugin_hub() -> dict:
+    entries, error = plugin_hub.get_index()
+    installed_ids = {plugin.id for plugin in plugins.all_plugins()}
+    for entry in entries:
+        entry["installed"] = entry.get("id") in installed_ids
+    return {"plugins": entries, "error": error}

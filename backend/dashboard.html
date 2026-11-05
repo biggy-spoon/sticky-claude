@@ -167,7 +167,12 @@
     button.btn:active { transform: scale(.97); }
     button.btn.secondary { background: transparent; border: 1px solid var(--border); color: var(--text); }
     button.btn.secondary:hover { border-color: var(--border-strong); background: var(--bg-subtle); }
+    button.btn.small { padding: 6px 12px; font-size: 12.5px; }
     .field[hidden] { display: none; }
+    code {
+      font-family: var(--font-mono); background: var(--bg-subtle); padding: 2px 5px;
+      border-radius: 4px; font-size: 12px;
+    }
 
     .save-msg {
       display: inline-flex; align-items: center; gap: 5px; font-size: 13px; color: var(--ok);
@@ -192,6 +197,37 @@
     .event-body { min-width: 0; }
     .event-title { font-size: 13.5px; font-weight: 500; }
     .event-time { font-size: 12px; color: var(--muted); font-family: var(--font-mono); margin-top: 1px; }
+
+    /* ---- todos ---- */
+    .todo-list { display: flex; flex-direction: column; }
+    .todo-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 13.5px; }
+    .todo-row:last-child { border-bottom: none; padding-bottom: 0; }
+    .todo-row.done { color: var(--muted); text-decoration: line-through; }
+    .todo-box {
+      width: 16px; height: 16px; border-radius: 4px; border: 1.5px solid var(--border-strong);
+      flex: none; display: flex; align-items: center; justify-content: center;
+    }
+    .todo-box.checked { background: var(--ok); border-color: var(--ok); color: white; }
+    .todo-box.checked .icon { width: 11px; height: 11px; stroke-width: 2.4; }
+
+    /* ---- plugin hub ---- */
+    .hub-item { padding: 14px 0; border-bottom: 1px solid var(--border); }
+    .hub-item:last-child { border-bottom: none; padding-bottom: 0; }
+    .hub-item-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .hub-item-title { font-weight: 600; font-size: 14px; }
+    .hub-item-desc { font-size: 13px; color: var(--muted); margin: 4px 0 8px; }
+    .hub-install-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+    .hub-cmd {
+      font-size: 12px; background: var(--bg-subtle); border: 1px solid var(--border);
+      padding: 6px 10px; border-radius: var(--radius-sm); overflow-x: auto; white-space: nowrap;
+      flex: 1; min-width: 0;
+    }
+    .hub-item-link {
+      font-size: 12.5px; color: var(--muted); text-decoration: none; display: inline-flex;
+      align-items: center; gap: 4px;
+    }
+    .hub-item-link:hover { color: var(--text); }
+    .hub-item-link .icon { width: 12px; height: 12px; }
 
     /* ---- history ---- */
     .history-list { display: flex; flex-direction: column; }
@@ -292,6 +328,24 @@
          UI left -- a future plugin wanting its own dashboard view would
          need a small addition here, same as calendar's. -->
     <div id="plugins"></div>
+
+    <section class="card">
+      <div class="card-head">
+        <span class="icon-box"><svg class="icon" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg></span>
+        <div>
+          <h2>Plugin hub</h2>
+          <p class="card-sub">Community plugins -- copy into <code>backend/plugins/</code> and restart to install</p>
+        </div>
+      </div>
+      <div id="plugin-hub-list">
+        <div class="skeleton" style="width:85%;margin-bottom:10px"></div>
+        <div class="skeleton" style="width:65%"></div>
+      </div>
+      <p class="hint" style="margin-top:14px">
+        Want to publish your own? See the
+        <a href="https://github.com/biggy-spoon/sticky-claude-plugin-hub" target="_blank" rel="noopener" style="color:var(--accent)">sticky-claude-plugin-hub</a> repo.
+      </p>
+    </section>
 
     <section class="card">
       <div class="card-head">
@@ -458,6 +512,13 @@
             </div>
             <div id="calendar-events" class="event-list"><div class="empty">Loading…</div></div>
           ` : ''}
+          ${plugin.id === 'todo' ? `
+            <div class="card-head" style="margin-top:20px">
+              <span class="icon-box"><svg class="icon" viewBox="0 0 24 24"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 12l2 2 4-4"/></svg></span>
+              <div><h2>Todo list</h2><p class="card-sub">Open and recently completed items</p></div>
+            </div>
+            <div id="todo-list" class="todo-list"><div class="empty">Loading…</div></div>
+          ` : ''}
         </section>
       `).join('');
 
@@ -472,6 +533,74 @@
 
       if (pluginList.some(p => p.id === 'calendar')) {
         loadCalendarEvents();
+      }
+      if (pluginList.some(p => p.id === 'todo')) {
+        loadTodoList();
+      }
+    }
+
+    async function loadTodoList() {
+      const data = await fetch('/api/plugins/todo/view').then(r => r.json());
+      const el = document.getElementById('todo-list');
+      const open = data.open || [];
+      const done = data.done || [];
+      if (!open.length && !done.length) {
+        el.innerHTML = '<div class="empty">Nothing on the list yet -- try "add buy milk to my todo list".</div>';
+        return;
+      }
+      const checkIcon = '<svg class="icon" viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg>';
+      el.innerHTML = open.map(t => `
+        <div class="todo-row"><span class="todo-box"></span><span>${escapeHtml(t.text)}</span></div>
+      `).join('') + done.map(t => `
+        <div class="todo-row done"><span class="todo-box checked">${checkIcon}</span><span>${escapeHtml(t.text)}</span></div>
+      `).join('');
+    }
+
+    async function loadPluginHub() {
+      const el = document.getElementById('plugin-hub-list');
+      const data = await fetch('/api/plugin-hub').then(r => r.json());
+      const hubPlugins = data.plugins || [];
+      if (data.error && !hubPlugins.length) {
+        el.innerHTML = `<div class="empty">Couldn't reach the plugin hub: ${escapeHtml(data.error)}</div>`;
+        return;
+      }
+      if (!hubPlugins.length) {
+        el.innerHTML = '<div class="empty">No community plugins listed yet -- be the first to submit one.</div>';
+        return;
+      }
+      el.innerHTML = hubPlugins.map(p => `
+        <div class="hub-item">
+          <div class="hub-item-head">
+            <div class="hub-item-title">${escapeHtml(p.name)}</div>
+            ${p.installed
+              ? '<span class="pill ok"><svg class="icon" viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg>Installed</span>'
+              : '<span class="pill neutral">Available</span>'}
+          </div>
+          <p class="hub-item-desc">${escapeHtml(p.description || '')}${p.author ? ` &middot; by ${escapeHtml(p.author)}` : ''}</p>
+          ${!p.installed && p.repo_url ? `
+            <div class="hub-install-row">
+              <code class="hub-cmd" id="hub-cmd-${escapeHtml(p.id)}">git clone ${escapeHtml(p.repo_url)} backend/plugins/${escapeHtml(p.id)}</code>
+              <button type="button" class="btn secondary small" onclick="copyHubCommand('${escapeHtml(p.id)}', this)">Copy</button>
+            </div>
+          ` : ''}
+          ${p.repo_url ? `
+            <a class="hub-item-link" href="${escapeHtml(p.repo_url)}" target="_blank" rel="noopener">
+              View on GitHub
+              <svg class="icon" viewBox="0 0 24 24"><path d="M7 17 17 7M9 7h8v8"/></svg>
+            </a>
+          ` : ''}
+        </div>
+      `).join('');
+    }
+
+    function copyHubCommand(id, btn) {
+      const text = document.getElementById(`hub-cmd-${id}`).textContent;
+      const label = btn.textContent;
+      const flash = () => { btn.textContent = 'Copied'; setTimeout(() => { btn.textContent = label; }, 1500); };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(flash).catch(flash);
+      } else {
+        flash();
       }
     }
 
@@ -530,6 +659,7 @@
     loadHistory();
     loadCoreSettings();
     renderPlugins();
+    loadPluginHub();
   </script>
 </body>
 </html>

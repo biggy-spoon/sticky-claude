@@ -31,6 +31,14 @@ CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS todos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT NOT NULL,
+    text TEXT NOT NULL,
+    done INTEGER NOT NULL DEFAULT 0,
+    done_at TEXT
+);
 """
 
 
@@ -104,3 +112,45 @@ def get_all_settings() -> dict:
     with _connect() as conn:
         rows = conn.execute("SELECT key, value FROM settings").fetchall()
         return {row["key"]: row["value"] for row in rows}
+
+
+def add_todo(text: str) -> int:
+    with _connect() as conn:
+        cursor = conn.execute(
+            "INSERT INTO todos (created_at, text, done) VALUES (?, ?, 0)",
+            (datetime.now(timezone.utc).isoformat(), text),
+        )
+        return cursor.lastrowid
+
+
+def list_todos(done: bool = False, limit: int = 50) -> list[dict]:
+    # Open items oldest-first (a todo list reads in the order it was
+    # built); done items most-recently-completed-first (for a "recently
+    # finished" dashboard view).
+    order = "DESC" if done else "ASC"
+    with _connect() as conn:
+        rows = conn.execute(
+            f"SELECT id, created_at, text, done, done_at FROM todos "
+            f"WHERE done = ? ORDER BY id {order} LIMIT ?",
+            (int(done), limit),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+
+def complete_todo(text_match: str) -> Optional[str]:
+    """Marks the most recently-added open todo whose text contains
+    `text_match` (case-insensitive) as done. Voice input won't carry a
+    todo's numeric id, so matching is by text rather than id. Returns the
+    matched todo's original text, or None if nothing open matched."""
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT id, text FROM todos WHERE done = 0 AND text LIKE ? ORDER BY id DESC LIMIT 1",
+            (f"%{text_match}%",),
+        ).fetchone()
+        if row is None:
+            return None
+        conn.execute(
+            "UPDATE todos SET done = 1, done_at = ? WHERE id = ?",
+            (datetime.now(timezone.utc).isoformat(), row["id"]),
+        )
+        return row["text"]
