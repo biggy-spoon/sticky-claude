@@ -1,124 +1,363 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>sticky-claude dashboard</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='6' fill='%237b5cff'/%3E%3Cpath d='M6 9a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2H11l-3 3v-3H8a2 2 0 0 1-2-2Z' fill='white'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <script>
+    (function () {
+      try {
+        var saved = localStorage.getItem('sticky-claude-theme');
+        if (saved === 'light' || saved === 'dark') {
+          document.documentElement.setAttribute('data-theme', saved);
+        }
+      } catch (e) {}
+    })();
+  </script>
   <style>
     :root {
-      --bg: #1a1a1a;
-      --card: #242424;
-      --border: #3a3a3a;
-      --text: #f0f0f0;
-      --muted: #999;
-      --accent: #7b5cff;
-      --accent-active: #6a4ce0;
-      --ok: #4caf50;
-      --bad: #e05656;
+      --font-sans: 'Inter', -apple-system, 'Segoe UI', system-ui, sans-serif;
+      --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Consolas, monospace;
+
+      --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px;
+      --space-5: 24px; --space-6: 32px;
+      --radius-sm: 8px; --radius-md: 12px; --radius-lg: 18px; --radius-full: 999px;
+      --ease: cubic-bezier(.4, 0, .2, 1);
+      --dur: 160ms;
+      --shadow-sm: 0 1px 2px rgba(0, 0, 0, .3);
+      --shadow-md: 0 8px 24px -8px rgba(0, 0, 0, .45);
+
+      --bg: #14151a;
+      --bg-subtle: #191a21;
+      --card: #1d1f26;
+      --border: #2a2d36;
+      --border-strong: #3a3e4a;
+      --text: #eef0f4;
+      --muted: #9a9fab;
+      --accent: #8b7bff;
+      --accent-strong: #7360f0;
+      --accent-soft: rgba(139, 123, 255, .16);
+      --ok: #3ddc84; --ok-soft: rgba(61, 220, 132, .14);
+      --warn: #f5b94d; --warn-soft: rgba(245, 185, 77, .14);
+      --bad: #f1636b; --bad-soft: rgba(241, 99, 107, .16);
     }
+    :root[data-theme="light"] {
+      --bg: #f7f6f2;
+      --bg-subtle: #f1efe9;
+      --card: #ffffff;
+      --border: #e5e1d8;
+      --border-strong: #d4cfc2;
+      --text: #211f1a;
+      --muted: #726c60;
+      --accent: #6a4ce0;
+      --accent-strong: #5a3fcf;
+      --accent-soft: rgba(106, 76, 224, .10);
+      --ok: #1f9d55; --ok-soft: rgba(31, 157, 85, .10);
+      --warn: #a66a08; --warn-soft: rgba(166, 106, 8, .10);
+      --bad: #c23642; --bad-soft: rgba(194, 54, 66, .10);
+      --shadow-sm: 0 1px 2px rgba(40, 35, 20, .06);
+      --shadow-md: 0 8px 24px -10px rgba(40, 35, 20, .18);
+    }
+
     * { box-sizing: border-box; }
+    html, body { background: var(--bg); }
     body {
-      font-family: -apple-system, system-ui, sans-serif;
-      background: var(--bg);
+      font-family: var(--font-sans);
       color: var(--text);
       margin: 0;
-      padding: 24px 16px 64px;
+      padding: 0 0 72px;
+      transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
     }
-    .wrap { max-width: 720px; margin: 0 auto; }
-    h1 { font-size: 22px; margin: 0 0 4px; }
-    p.sub { color: var(--muted); margin: 0 0 28px; font-size: 14px; }
+    .icon { width: 18px; height: 18px; stroke: currentColor; fill: none; stroke-width: 1.8;
+            stroke-linecap: round; stroke-linejoin: round; flex: none; display: block; }
+
+    /* ---- topbar ---- */
+    .topbar { position: sticky; top: 0; z-index: 10; }
+    .topbar::before {
+      content: ''; position: absolute; inset: 0; background: var(--bg);
+      opacity: .82; backdrop-filter: blur(10px); border-bottom: 1px solid var(--border);
+    }
+    @supports not (backdrop-filter: blur(1px)) { .topbar::before { opacity: 1; } }
+    .topbar-inner {
+      position: relative; max-width: 720px; margin: 0 auto; padding: 14px 16px;
+      display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    }
+    .brand { display: flex; align-items: center; gap: 10px; }
+    .brand-mark {
+      width: 34px; height: 34px; border-radius: var(--radius-sm); background: var(--accent);
+      color: white; display: flex; align-items: center; justify-content: center; flex: none;
+    }
+    .brand-mark .icon { width: 19px; height: 19px; stroke: white; }
+    .brand-name { font-weight: 700; font-size: 15px; line-height: 1.2; }
+    .brand-sub { font-size: 12px; color: var(--muted); line-height: 1.2; }
+    .topbar-actions { display: flex; align-items: center; gap: 8px; }
+    .icon-btn {
+      width: 34px; height: 34px; border-radius: var(--radius-sm); border: 1px solid var(--border);
+      background: var(--card); color: var(--muted); display: flex; align-items: center; justify-content: center;
+      cursor: pointer; transition: border-color var(--dur) var(--ease), color var(--dur) var(--ease);
+    }
+    .icon-btn:hover { color: var(--text); border-color: var(--border-strong); }
+    .icon-btn .icon-moon { display: none; }
+    :root[data-theme="light"] .icon-btn .icon-sun { display: none; }
+    :root[data-theme="light"] .icon-btn .icon-moon { display: block; }
+
+    /* ---- layout ---- */
+    .wrap { max-width: 720px; margin: 0 auto; padding: var(--space-5) 16px 0; }
     .card {
-      background: var(--card);
-      border: 1px solid var(--border);
-      border-radius: 14px;
-      padding: 20px;
-      margin-bottom: 20px;
+      background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-lg);
+      padding: var(--space-5); margin-bottom: var(--space-4); box-shadow: var(--shadow-sm);
     }
-    .card h2 { font-size: 15px; margin: 0 0 4px; text-transform: uppercase;
-               letter-spacing: 0.04em; color: var(--muted); display: flex; align-items: center; gap: 8px; }
-    .card p.plugin-desc { font-size: 13px; color: var(--muted); margin: 0 0 14px; }
-    .status-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; font-size: 14px; }
-    .status-grid .label { color: var(--muted); }
-    .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; flex: none; }
+    .card-head { display: flex; align-items: flex-start; gap: 12px; margin-bottom: var(--space-4); }
+    .icon-box {
+      width: 32px; height: 32px; border-radius: var(--radius-sm); background: var(--accent-soft);
+      color: var(--accent); display: flex; align-items: center; justify-content: center; flex: none; margin-top: 1px;
+    }
+    .card-head h2 { font-size: 15px; margin: 0; font-weight: 600; }
+    .card-sub { font-size: 12.5px; color: var(--muted); margin: 2px 0 0; }
+
+    /* ---- pills / dots ---- */
+    .pill {
+      display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 500;
+      padding: 4px 10px; border-radius: var(--radius-full); line-height: 1.3;
+    }
+    .pill .icon { width: 13px; height: 13px; }
+    .pill.ok { background: var(--ok-soft); color: var(--ok); }
+    .pill.warn { background: var(--warn-soft); color: var(--warn); }
+    .pill.bad { background: var(--bad-soft); color: var(--bad); }
+    .pill.neutral { background: var(--bg-subtle); color: var(--muted); border: 1px solid var(--border); }
+    .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
     .dot.ok { background: var(--ok); }
     .dot.bad { background: var(--bad); }
-    label { display: block; font-size: 13px; color: var(--muted); margin: 14px 0 6px; }
-    label:first-of-type { margin-top: 0; }
+
+    /* ---- status list ---- */
+    .status-list { display: flex; flex-direction: column; }
+    .status-row {
+      display: flex; align-items: center; justify-content: space-between; gap: 12px;
+      padding: 9px 0; border-bottom: 1px solid var(--border); font-size: 13.5px;
+    }
+    .status-row:last-child { border-bottom: none; padding-bottom: 0; }
+    .status-row .label { color: var(--muted); }
+    .status-row .value { font-family: var(--font-mono); font-size: 12.5px; text-align: right; }
+
+    /* ---- forms ---- */
+    .field-group { margin-bottom: var(--space-4); }
+    .field-group:last-of-type { margin-bottom: var(--space-3); }
+    label { display: block; font-size: 13px; font-weight: 500; margin-bottom: 6px; }
+    .hint { font-size: 12px; color: var(--muted); margin: 6px 0 0; }
     input, select {
-      width: 100%; padding: 10px 12px; border-radius: 9px; border: 1px solid var(--border);
-      background: var(--bg); color: var(--text); font-size: 14px;
+      width: 100%; padding: 10px 12px; border-radius: var(--radius-sm); border: 1px solid var(--border);
+      background: var(--bg-subtle); color: var(--text); font-size: 14px; font-family: inherit;
+      transition: border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
     }
-    input:focus, select:focus { outline: none; border-color: var(--accent); }
-    button {
-      padding: 10px 18px; border-radius: 9px; border: none; background: var(--accent);
-      color: white; font-size: 14px; font-weight: 600; cursor: pointer; margin-top: 16px;
+    input:focus, select:focus {
+      outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft);
     }
-    button:active { background: var(--accent-active); }
-    button.secondary { background: transparent; border: 1px solid var(--border); color: var(--text); }
+    input::placeholder { color: var(--muted); }
+    .card-actions { display: flex; align-items: center; gap: 12px; margin-top: var(--space-4); }
+    button.btn {
+      padding: 9px 18px; border-radius: var(--radius-sm); border: none; background: var(--accent);
+      color: white; font-size: 13.5px; font-weight: 600; cursor: pointer; font-family: inherit;
+      transition: background var(--dur) var(--ease), transform var(--dur) var(--ease);
+    }
+    button.btn:hover { background: var(--accent-strong); }
+    button.btn:active { transform: scale(.97); }
+    button.btn.secondary { background: transparent; border: 1px solid var(--border); color: var(--text); }
+    button.btn.secondary:hover { border-color: var(--border-strong); background: var(--bg-subtle); }
     .field[hidden] { display: none; }
-    .event, .history-item {
-      padding: 12px 0; border-bottom: 1px solid var(--border); font-size: 14px;
+
+    .save-msg {
+      display: inline-flex; align-items: center; gap: 5px; font-size: 13px; color: var(--ok);
+      opacity: 0; transform: translateY(2px); transition: opacity var(--dur) var(--ease), transform var(--dur) var(--ease);
     }
-    .event:last-child, .history-item:last-child { border-bottom: none; }
-    .event .when, .history-item .when { color: var(--muted); font-size: 12px; }
-    .history-item .transcript { color: var(--muted); margin-top: 4px; }
+    .save-msg.show { opacity: 1; transform: translateY(0); }
+    .save-msg .icon { width: 14px; height: 14px; }
+
+    /* ---- plugin cards ---- */
+    .plugin-head-right { margin-left: auto; }
+
+    /* ---- events ---- */
+    .event-list { display: flex; flex-direction: column; }
+    .event-row { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--border); }
+    .event-row:last-child { border-bottom: none; padding-bottom: 0; }
+    .date-chip {
+      width: 42px; flex: none; text-align: center; border-radius: var(--radius-sm);
+      background: var(--bg-subtle); border: 1px solid var(--border); padding: 5px 0; line-height: 1.1;
+    }
+    .date-chip .dow { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+    .date-chip .day { font-size: 15px; font-weight: 700; }
+    .event-body { min-width: 0; }
+    .event-title { font-size: 13.5px; font-weight: 500; }
+    .event-time { font-size: 12px; color: var(--muted); font-family: var(--font-mono); margin-top: 1px; }
+
+    /* ---- history ---- */
+    .history-list { display: flex; flex-direction: column; }
+    .history-item { padding: 12px 0; border-bottom: 1px solid var(--border); font-size: 13.5px; }
+    .history-item:last-child { border-bottom: none; padding-bottom: 0; }
+    .history-meta { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 5px; }
+    .history-meta .when { color: var(--muted); font-size: 11.5px; font-family: var(--font-mono); }
+    .history-item .transcript { color: var(--muted); font-style: italic; }
     .history-item .reply { margin-top: 4px; }
     .history-item.failed .reply { color: var(--bad); }
-    .empty { color: var(--muted); font-size: 14px; }
-    .save-msg { font-size: 13px; margin-top: 10px; color: var(--ok); display: none; }
+
+    .empty { color: var(--muted); font-size: 13.5px; }
+    .skeleton { height: 14px; border-radius: 6px; background: linear-gradient(90deg, var(--bg-subtle) 25%, var(--border) 37%, var(--bg-subtle) 63%);
+                background-size: 400% 100%; animation: shimmer 1.4s ease infinite; }
+    @keyframes shimmer { 0% { background-position: 100% 50%; } 100% { background-position: 0 50%; } }
+
+    .app-footer {
+      max-width: 720px; margin: var(--space-6) auto 0; padding: 0 16px; text-align: center;
+      font-size: 12.5px; color: var(--muted);
+    }
+    .app-footer a { color: var(--muted); text-decoration: none; display: inline-flex; align-items: center; gap: 4px; }
+    .app-footer a:hover { color: var(--text); }
+    .app-footer .icon { width: 13px; height: 13px; }
+
+    @media (max-width: 420px) {
+      .status-row { flex-wrap: wrap; }
+      .status-row .value { text-align: left; }
+    }
   </style>
 </head>
 <body>
-  <div class="wrap">
-    <h1>sticky-claude</h1>
-    <p class="sub">Dashboard</p>
-
-    <div class="card">
-      <h2>Status</h2>
-      <div class="status-grid" id="status-grid">
-        <div class="empty">Loading...</div>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand">
+        <span class="brand-mark">
+          <svg class="icon" viewBox="0 0 24 24"><path d="M5 8a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-6l-4 4v-4H7a2 2 0 0 1-2-2Z"/></svg>
+        </span>
+        <div>
+          <div class="brand-name">sticky-claude</div>
+          <div class="brand-sub">Dashboard</div>
+        </div>
+      </div>
+      <div class="topbar-actions">
+        <span class="pill neutral" id="ready-pill"><span class="dot"></span><span>Checking…</span></span>
+        <button type="button" class="icon-btn" aria-label="Toggle color theme" onclick="toggleTheme()">
+          <svg class="icon icon-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/></svg>
+          <svg class="icon icon-moon" viewBox="0 0 24 24"><path d="M20 14.5A8.5 8.5 0 1 1 9.5 4a7 7 0 0 0 10.5 10.5Z"/></svg>
+        </button>
       </div>
     </div>
+  </header>
 
-    <div class="card">
-      <h2>Core settings</h2>
-      <label for="anthropic-key">Anthropic API key</label>
-      <input id="anthropic-key" type="password" placeholder="sk-ant-...">
+  <main class="wrap">
+    <section class="card" aria-labelledby="status-heading">
+      <div class="card-head">
+        <span class="icon-box"><svg class="icon" viewBox="0 0 24 24"><path d="M3 12h3l2.5-7 4 14 2.5-7H21"/></svg></span>
+        <div>
+          <h2 id="status-heading">Status</h2>
+          <p class="card-sub">Live device and assistant state</p>
+        </div>
+      </div>
+      <div class="status-list" id="status-grid">
+        <div class="skeleton" style="width:90%;margin-bottom:10px"></div>
+        <div class="skeleton" style="width:70%;margin-bottom:10px"></div>
+        <div class="skeleton" style="width:80%"></div>
+      </div>
+    </section>
 
-      <label for="claude-model">Claude model</label>
-      <input id="claude-model" type="text" placeholder="claude-haiku-5-5">
+    <section class="card">
+      <div class="card-head">
+        <span class="icon-box"><svg class="icon" viewBox="0 0 24 24"><path d="M4 6h16M4 6a2 2 0 1 0 4 0 2 2 0 1 0-4 0M4 12h16M14 12a2 2 0 1 0 4 0 2 2 0 1 0-4 0M4 18h16M7 18a2 2 0 1 0 4 0 2 2 0 1 0-4 0"/></svg></span>
+        <div>
+          <h2>Core settings</h2>
+          <p class="card-sub">Anthropic API access for the assistant</p>
+        </div>
+      </div>
+      <div class="field-group">
+        <label for="anthropic-key">Anthropic API key</label>
+        <input id="anthropic-key" type="password" placeholder="sk-ant-...">
+        <p class="hint">Stored locally on this backend. Never sent anywhere else.</p>
+      </div>
+      <div class="field-group">
+        <label for="claude-model">Claude model</label>
+        <input id="claude-model" type="text" placeholder="claude-haiku-5-5">
+      </div>
+      <div class="card-actions">
+        <button type="button" class="btn" onclick="saveCoreSettings()">Save</button>
+        <span class="save-msg" id="core-save-msg">
+          <svg class="icon" viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg>Saved
+        </span>
+      </div>
+    </section>
 
-      <button type="button" onclick="saveCoreSettings()">Save</button>
-      <div class="save-msg" id="core-save-msg">Saved.</div>
-    </div>
-
-    <!-- Plugin cards (settings form + the calendar plugin's events view)
-         are injected here by renderPlugins(). A plugin's settings form is
-         fully generic (built from its settings_schema); the "Upcoming
-         events" list is the one plugin-aware bit of UI left -- a future
-         plugin wanting its own dashboard view would need a small addition
-         here, same as calendar's. -->
+    <!-- Plugin cards (settings form + a plugin's own dashboard view, like
+         calendar's "Upcoming events") are injected here by renderPlugins().
+         A plugin's settings form is fully generic (built from its
+         settings_schema); the events list is the one plugin-aware bit of
+         UI left -- a future plugin wanting its own dashboard view would
+         need a small addition here, same as calendar's. -->
     <div id="plugins"></div>
 
-    <div class="card">
-      <h2>Recent conversations</h2>
-      <div id="history"><div class="empty">Loading...</div></div>
-    </div>
-  </div>
+    <section class="card">
+      <div class="card-head">
+        <span class="icon-box"><svg class="icon" viewBox="0 0 24 24"><path d="M21 11.5a8.4 8.4 0 0 1-1.4 4.7L21 20l-3.9-1.2a8.5 8.5 0 1 1 3.9-7.3Z"/></svg></span>
+        <div>
+          <h2>Recent conversations</h2>
+          <p class="card-sub">Latest push-to-talk exchanges</p>
+        </div>
+      </div>
+      <div id="history" class="history-list"><div class="empty">Loading…</div></div>
+    </section>
+  </main>
+
+  <footer class="app-footer">
+    <a href="https://github.com/biggy-spoon/sticky-claude" target="_blank" rel="noopener">
+      sticky-claude is open source — view it on GitHub
+      <svg class="icon" viewBox="0 0 24 24"><path d="M7 17 17 7M9 7h8v8"/></svg>
+    </a>
+  </footer>
 
   <script>
+    function toggleTheme() {
+      const current = document.documentElement.getAttribute('data-theme') || 'dark';
+      const next = current === 'light' ? 'dark' : 'light';
+      document.documentElement.setAttribute('data-theme', next);
+      try { localStorage.setItem('sticky-claude-theme', next); } catch (e) {}
+    }
+
+    function timeAgo(iso) {
+      if (!iso) return 'never';
+      const diffMs = Date.now() - new Date(iso).getTime();
+      const min = Math.round(diffMs / 60000);
+      if (min < 1) return 'just now';
+      if (min < 60) return `${min}m ago`;
+      const hr = Math.round(min / 60);
+      if (hr < 24) return `${hr}h ago`;
+      return `${Math.round(hr / 24)}d ago`;
+    }
+
+    function statusRow(label, valueHtml) {
+      return `<div class="status-row"><div class="label">${label}</div><div class="value">${valueHtml}</div></div>`;
+    }
+
+    function configuredPill(ok, okLabel, badLabel) {
+      return ok
+        ? `<span class="pill ok"><svg class="icon" viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg>${okLabel}</span>`
+        : `<span class="pill bad"><svg class="icon" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg>${badLabel}</span>`;
+    }
+
     async function loadStatus() {
       const status = await fetch('/api/status').then(r => r.json());
       const grid = document.getElementById('status-grid');
       const seen = status.last_seen ? new Date(status.last_seen).toLocaleString() : 'never';
-      grid.innerHTML = `
-        <div class="label">Device last seen</div><div>${seen}</div>
-        <div class="label">Device IP</div><div>${status.last_ip || '--'}</div>
-        <div class="label">Claude model</div><div>${status.claude_model}</div>
-        <div class="label">Whisper model</div><div>${status.whisper_model}</div>
-        <div class="label">Anthropic key</div>
-        <div><span class="dot ${status.anthropic_configured ? 'ok' : 'bad'}"></span>${status.anthropic_configured ? 'Configured' : 'Not set'}</div>
-      `;
+      grid.innerHTML = [
+        statusRow('Device last seen', `<span title="${seen}">${timeAgo(status.last_seen)}</span>`),
+        statusRow('Device IP', status.last_ip || '--'),
+        statusRow('Claude model', escapeHtml(status.claude_model)),
+        statusRow('Whisper model', escapeHtml(status.whisper_model)),
+        statusRow('Anthropic key', configuredPill(status.anthropic_configured, 'Configured', 'Not set')),
+      ].join('');
+
+      const readyPill = document.getElementById('ready-pill');
+      readyPill.className = `pill ${status.anthropic_configured ? 'ok' : 'warn'}`;
+      readyPill.innerHTML = status.anthropic_configured
+        ? `<span class="dot ok"></span><span>Assistant ready</span>`
+        : `<span class="dot bad"></span><span>Needs API key</span>`;
     }
 
     async function loadHistory() {
@@ -130,7 +369,10 @@
       }
       el.innerHTML = history.map(h => `
         <div class="history-item ${h.success ? '' : 'failed'}">
-          <div class="when">${new Date(h.created_at).toLocaleString()}</div>
+          <div class="history-meta">
+            <span class="when">${new Date(h.created_at).toLocaleString()}</span>
+            ${h.success ? '' : '<span class="pill bad">Failed</span>'}
+          </div>
           <div class="transcript">"${escapeHtml(h.transcript)}"</div>
           <div class="reply">${escapeHtml(h.success ? h.reply : (h.error_message || 'Failed'))}</div>
         </div>
@@ -157,7 +399,7 @@
 
     function renderField(pluginId, field) {
       if (field.type === 'button') {
-        return `<button type="button" class="secondary" onclick="window.open('${field.button_url}', '_blank')">${field.button_label}</button>`;
+        return `<button type="button" class="btn secondary" onclick="window.open('${field.button_url}', '_blank')">${field.button_label}</button>`;
       }
       const id = fieldInputId(pluginId, field.key);
       const labelHtml = field.label ? `<label for="${id}">${escapeHtml(field.label)}</label>` : '';
@@ -187,17 +429,36 @@
       const pluginList = await fetch('/api/plugins').then(r => r.json());
       const container = document.getElementById('plugins');
       container.innerHTML = pluginList.map(plugin => `
-        <div class="card">
-          <h2><span class="dot ${plugin.configured ? 'ok' : 'bad'}"></span>${escapeHtml(plugin.name)}</h2>
-          <p class="plugin-desc">${escapeHtml(plugin.description)}</p>
-          ${plugin.fields.map(f => `<div class="field" id="${fieldInputId(plugin.id, f.key)}-wrap">${renderField(plugin.id, f)}</div>`).join('')}
-          <button type="button" onclick="savePluginSettings('${plugin.id}')">Save</button>
-          <div class="save-msg" id="save-msg-${plugin.id}">Saved.</div>
+        <section class="card">
+          <div class="card-head">
+            <span class="icon-box">
+              ${plugin.id === 'calendar'
+                ? '<svg class="icon" viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="16" rx="2"/><path d="M4 10h16M8 3v4M16 3v4"/></svg>'
+                : '<svg class="icon" viewBox="0 0 24 24"><path d="M9 2v4M15 2v4M6 9h12v4a6 6 0 0 1-12 0Z"/><path d="M12 19v3"/></svg>'}
+            </span>
+            <div>
+              <h2>${escapeHtml(plugin.name)}</h2>
+              <p class="card-sub">${escapeHtml(plugin.description)}</p>
+            </div>
+            <div class="plugin-head-right">${configuredPill(plugin.configured, 'Connected', 'Not configured')}</div>
+          </div>
+          <div class="field-group">
+            ${plugin.fields.map(f => `<div class="field" id="${fieldInputId(plugin.id, f.key)}-wrap">${renderField(plugin.id, f)}</div>`).join('')}
+          </div>
+          <div class="card-actions">
+            <button type="button" class="btn" onclick="savePluginSettings('${plugin.id}')">Save</button>
+            <span class="save-msg" id="save-msg-${plugin.id}">
+              <svg class="icon" viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg>Saved
+            </span>
+          </div>
           ${plugin.id === 'calendar' ? `
-            <h2 style="margin-top:24px">Upcoming events</h2>
-            <div id="calendar-events"><div class="empty">Loading...</div></div>
+            <div class="card-head" style="margin-top:20px">
+              <span class="icon-box"><svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span>
+              <div><h2>Upcoming events</h2><p class="card-sub">Next 30 days</p></div>
+            </div>
+            <div id="calendar-events" class="event-list"><div class="empty">Loading…</div></div>
           ` : ''}
-        </div>
+        </section>
       `).join('');
 
       for (const plugin of pluginList) {
@@ -237,18 +498,26 @@
         el.innerHTML = '<div class="empty">No upcoming events, or calendar not configured.</div>';
         return;
       }
-      el.innerHTML = events.map(e => `
-        <div class="event">
-          <div class="when">${new Date(e.start).toLocaleString()}</div>
-          <div>${escapeHtml(e.summary)}</div>
-        </div>
-      `).join('');
+      el.innerHTML = events.map(e => {
+        const start = new Date(e.start);
+        const dow = start.toLocaleDateString(undefined, { weekday: 'short' });
+        const time = start.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+        return `
+          <div class="event-row">
+            <div class="date-chip"><div class="dow">${dow}</div><div class="day">${start.getDate()}</div></div>
+            <div class="event-body">
+              <div class="event-title">${escapeHtml(e.summary)}</div>
+              <div class="event-time">${time}</div>
+            </div>
+          </div>
+        `;
+      }).join('');
     }
 
     function flashSaved(id) {
       const msg = document.getElementById(id);
-      msg.style.display = 'block';
-      setTimeout(() => { msg.style.display = 'none'; }, 2000);
+      msg.classList.add('show');
+      setTimeout(() => { msg.classList.remove('show'); }, 2000);
     }
 
     function escapeHtml(text) {
