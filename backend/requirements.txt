@@ -1,7 +1,10 @@
 fastapi==0.115.0
 uvicorn[standard]==0.30.6
 python-dotenv==1.0.1
-anthropic==0.40.0
+anthropic==2.5.0
+# 0.40.0 (the original pin) has a real bug parsing tool_use responses on
+# this stack -- AttributeError in its discriminated-union handling,
+# confirmed when testing the calendar tool-use loop. 2.5.0 fixed it.
 faster-whisper==1.2.1
 # faster-whisper under-constrains its `av` dependency: unpinned, pip resolves
 # the latest av (19.x), whose API faster-whisper 1.2.1 doesn't support yet
@@ -9,3 +12,12 @@ faster-whisper==1.2.1
 # transcription. Pin to a version confirmed to work until faster-whisper
 # tightens its own constraint.
 av==15.1.0
+requests==2.34.2
+
+# Calendar integration: CalDAV covers iCloud, Fastmail, Nextcloud, etc.;
+# google-api-python-client covers Google Calendar via OAuth.
+caldav==3.7.0
+icalendar==7.3.0
+google-auth==2.62.1
+google-auth-oauthlib==1.5.0
+google-api-python-client==2.201.0

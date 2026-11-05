@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>sticky-claude dashboard</title>
+  <style>
+    :root {
+      --bg: #1a1a1a;
+      --card: #242424;
+      --border: #3a3a3a;
+      --text: #f0f0f0;
+      --muted: #999;
+      --accent: #7b5cff;
+      --accent-active: #6a4ce0;
+      --ok: #4caf50;
+      --bad: #e05656;
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      margin: 0;
+      padding: 24px 16px 64px;
+    }
+    .wrap { max-width: 720px; margin: 0 auto; }
+    h1 { font-size: 22px; margin: 0 0 4px; }
+    p.sub { color: var(--muted); margin: 0 0 28px; font-size: 14px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+    .card h2 { font-size: 15px; margin: 0 0 14px; text-transform: uppercase;
+               letter-spacing: 0.04em; color: var(--muted); }
+    .status-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; font-size: 14px; }
+    .status-grid .label { color: var(--muted); }
+    .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+    .dot.ok { background: var(--ok); }
+    .dot.bad { background: var(--bad); }
+    label { display: block; font-size: 13px; color: var(--muted); margin: 14px 0 6px; }
+    label:first-of-type { margin-top: 0; }
+    input, select {
+      width: 100%; padding: 10px 12px; border-radius: 9px; border: 1px solid var(--border);
+      background: var(--bg); color: var(--text); font-size: 14px;
+    }
+    input:focus, select:focus { outline: none; border-color: var(--accent); }
+    button {
+      padding: 10px 18px; border-radius: 9px; border: none; background: var(--accent);
+      color: white; font-size: 14px; font-weight: 600; cursor: pointer; margin-top: 16px;
+    }
+    button:active { background: var(--accent-active); }
+    button.secondary { background: transparent; border: 1px solid var(--border); color: var(--text); }
+    .provider-fields { display: none; }
+    .provider-fields.active { display: block; }
+    .event, .history-item {
+      padding: 12px 0; border-bottom: 1px solid var(--border); font-size: 14px;
+    }
+    .event:last-child, .history-item:last-child { border-bottom: none; }
+    .event .when, .history-item .when { color: var(--muted); font-size: 12px; }
+    .history-item .transcript { color: var(--muted); margin-top: 4px; }
+    .history-item .reply { margin-top: 4px; }
+    .history-item.failed .reply { color: var(--bad); }
+    .empty { color: var(--muted); font-size: 14px; }
+    .save-msg { font-size: 13px; margin-top: 10px; color: var(--ok); display: none; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>sticky-claude</h1>
+    <p class="sub">Dashboard</p>
+
+    <div class="card">
+      <h2>Status</h2>
+      <div class="status-grid" id="status-grid">
+        <div class="empty">Loading...</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Upcoming events</h2>
+      <div id="calendar-events"><div class="empty">Loading...</div></div>
+    </div>
+
+    <div class="card">
+      <h2>Settings</h2>
+      <label for="anthropic-key">Anthropic API key</label>
+      <input id="anthropic-key" type="password" placeholder="sk-ant-...">
+
+      <label for="claude-model">Claude model</label>
+      <input id="claude-model" type="text" placeholder="claude-haiku-5-5">
+
+      <label for="calendar-provider">Calendar</label>
+      <select id="calendar-provider">
+        <option value="none">None</option>
+        <option value="caldav">CalDAV (iCloud, Fastmail, Nextcloud...)</option>
+        <option value="google">Google Calendar</option>
+      </select>
+
+      <div class="provider-fields" id="caldav-fields">
+        <label for="caldav-url">CalDAV URL</label>
+        <input id="caldav-url" type="text" placeholder="https://caldav.icloud.com">
+        <label for="caldav-username">Username</label>
+        <input id="caldav-username" type="text" placeholder="you@icloud.com">
+        <label for="caldav-password">App-specific password</label>
+        <input id="caldav-password" type="password">
+        <label for="caldav-calendar-name">Calendar name (optional)</label>
+        <input id="caldav-calendar-name" type="text" placeholder="Leave blank to use the first calendar">
+      </div>
+
+      <div class="provider-fields" id="google-fields">
+        <label for="google-client-id">Google OAuth client ID</label>
+        <input id="google-client-id" type="text">
+        <label for="google-client-secret">Google OAuth client secret</label>
+        <input id="google-client-secret" type="password">
+        <label for="google-calendar-id">Calendar ID (optional)</label>
+        <input id="google-calendar-id" type="text" placeholder="primary">
+        <button type="button" class="secondary" onclick="connectGoogle()">Connect with Google</button>
+      </div>
+
+      <button type="button" onclick="saveSettings()">Save</button>
+      <div class="save-msg" id="save-msg">Saved.</div>
+    </div>
+
+    <div class="card">
+      <h2>Recent conversations</h2>
+      <div id="history"><div class="empty">Loading...</div></div>
+    </div>
+  </div>
+
+  <script>
+    async function loadStatus() {
+      const status = await fetch('/api/status').then(r => r.json());
+      const grid = document.getElementById('status-grid');
+      const seen = status.last_seen ? new Date(status.last_seen).toLocaleString() : 'never';
+      grid.innerHTML = `
+        <div class="label">Device last seen</div><div>${seen}</div>
+        <div class="label">Device IP</div><div>${status.last_ip || '--'}</div>
+        <div class="label">Claude model</div><div>${status.claude_model}</div>
+        <div class="label">Whisper model</div><div>${status.whisper_model}</div>
+        <div class="label">Anthropic key</div>
+        <div><span class="dot ${status.anthropic_configured ? 'ok' : 'bad'}"></span>${status.anthropic_configured ? 'Configured' : 'Not set'}</div>
+        <div class="label">Calendar</div>
+        <div><span class="dot ${status.calendar_configured ? 'ok' : 'bad'}"></span>${status.calendar_configured ? 'Connected' : 'Not configured'}</div>
+      `;
+    }
+
+    async function loadCalendar() {
+      const events = await fetch('/api/calendar/events').then(r => r.json());
+      const el = document.getElementById('calendar-events');
+      if (!events.length) {
+        el.innerHTML = '<div class="empty">No upcoming events, or calendar not configured.</div>';
+        return;
+      }
+      el.innerHTML = events.map(e => `
+        <div class="event">
+          <div class="when">${new Date(e.start).toLocaleString()}</div>
+          <div>${escapeHtml(e.summary)}</div>
+        </div>
+      `).join('');
+    }
+
+    async function loadHistory() {
+      const history = await fetch('/api/history').then(r => r.json());
+      const el = document.getElementById('history');
+      if (!history.length) {
+        el.innerHTML = '<div class="empty">No conversations yet.</div>';
+        return;
+      }
+      el.innerHTML = history.map(h => `
+        <div class="history-item ${h.success ? '' : 'failed'}">
+          <div class="when">${new Date(h.created_at).toLocaleString()}</div>
+          <div class="transcript">"${escapeHtml(h.transcript)}"</div>
+          <div class="reply">${escapeHtml(h.success ? h.reply : (h.error_message || 'Failed'))}</div>
+        </div>
+      `).join('');
+    }
+
+    async function loadSettings() {
+      const config = await fetch('/api/settings').then(r => r.json());
+      document.getElementById('claude-model').value = config.claude_model || '';
+      document.getElementById('calendar-provider').value = config.calendar_provider || 'none';
+      document.getElementById('caldav-url').value = config.caldav_url || '';
+      document.getElementById('caldav-username').value = config.caldav_username || '';
+      document.getElementById('caldav-calendar-name').value = config.caldav_calendar_name || '';
+      document.getElementById('google-client-id').value = config.google_client_id || '';
+      document.getElementById('google-calendar-id').value = config.google_calendar_id || '';
+      updateProviderFields();
+    }
+
+    function updateProviderFields() {
+      const provider = document.getElementById('calendar-provider').value;
+      document.getElementById('caldav-fields').classList.toggle('active', provider === 'caldav');
+      document.getElementById('google-fields').classList.toggle('active', provider === 'google');
+    }
+    document.getElementById('calendar-provider').addEventListener('change', updateProviderFields);
+
+    async function saveSettings() {
+      const body = {
+        claude_model: document.getElementById('claude-model').value,
+        calendar_provider: document.getElementById('calendar-provider').value,
+        caldav_url: document.getElementById('caldav-url').value,
+        caldav_username: document.getElementById('caldav-username').value,
+        caldav_calendar_name: document.getElementById('caldav-calendar-name').value,
+        google_client_id: document.getElementById('google-client-id').value,
+        google_calendar_id: document.getElementById('google-calendar-id').value,
+      };
+      const key = document.getElementById('anthropic-key').value;
+      if (key) body.anthropic_api_key = key;
+      const caldavPassword = document.getElementById('caldav-password').value;
+      if (caldavPassword) body.caldav_password = caldavPassword;
+      const googleSecret = document.getElementById('google-client-secret').value;
+      if (googleSecret) body.google_client_secret = googleSecret;
+
+      await fetch('/api/settings', {
+        method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body),
+      });
+      const msg = document.getElementById('save-msg');
+      msg.style.display = 'block';
+      setTimeout(() => { msg.style.display = 'none'; }, 2000);
+      loadStatus();
+      loadCalendar();
+    }
+
+    function connectGoogle() {
+      window.open('/api/calendar/google/login', '_blank');
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text || '';
+      return div.innerHTML;
+    }
+
+    loadStatus();
+    loadCalendar();
+    loadHistory();
+    loadSettings();
+  </script>
+</body>
+</html>
