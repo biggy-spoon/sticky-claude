@@ -34,11 +34,12 @@
       padding: 20px;
       margin-bottom: 20px;
     }
-    .card h2 { font-size: 15px; margin: 0 0 14px; text-transform: uppercase;
-               letter-spacing: 0.04em; color: var(--muted); }
+    .card h2 { font-size: 15px; margin: 0 0 4px; text-transform: uppercase;
+               letter-spacing: 0.04em; color: var(--muted); display: flex; align-items: center; gap: 8px; }
+    .card p.plugin-desc { font-size: 13px; color: var(--muted); margin: 0 0 14px; }
     .status-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; font-size: 14px; }
     .status-grid .label { color: var(--muted); }
-    .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+    .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; flex: none; }
     .dot.ok { background: var(--ok); }
     .dot.bad { background: var(--bad); }
     label { display: block; font-size: 13px; color: var(--muted); margin: 14px 0 6px; }
@@ -54,8 +55,7 @@
     }
     button:active { background: var(--accent-active); }
     button.secondary { background: transparent; border: 1px solid var(--border); color: var(--text); }
-    .provider-fields { display: none; }
-    .provider-fields.active { display: block; }
+    .field[hidden] { display: none; }
     .event, .history-item {
       padding: 12px 0; border-bottom: 1px solid var(--border); font-size: 14px;
     }
@@ -81,49 +81,24 @@
     </div>
 
     <div class="card">
-      <h2>Upcoming events</h2>
-      <div id="calendar-events"><div class="empty">Loading...</div></div>
-    </div>
-
-    <div class="card">
-      <h2>Settings</h2>
+      <h2>Core settings</h2>
       <label for="anthropic-key">Anthropic API key</label>
       <input id="anthropic-key" type="password" placeholder="sk-ant-...">
 
       <label for="claude-model">Claude model</label>
       <input id="claude-model" type="text" placeholder="claude-haiku-5-5">
 
-      <label for="calendar-provider">Calendar</label>
-      <select id="calendar-provider">
-        <option value="none">None</option>
-        <option value="caldav">CalDAV (iCloud, Fastmail, Nextcloud...)</option>
-        <option value="google">Google Calendar</option>
-      </select>
-
-      <div class="provider-fields" id="caldav-fields">
-        <label for="caldav-url">CalDAV URL</label>
-        <input id="caldav-url" type="text" placeholder="https://caldav.icloud.com">
-        <label for="caldav-username">Username</label>
-        <input id="caldav-username" type="text" placeholder="you@icloud.com">
-        <label for="caldav-password">App-specific password</label>
-        <input id="caldav-password" type="password">
-        <label for="caldav-calendar-name">Calendar name (optional)</label>
-        <input id="caldav-calendar-name" type="text" placeholder="Leave blank to use the first calendar">
-      </div>
-
-      <div class="provider-fields" id="google-fields">
-        <label for="google-client-id">Google OAuth client ID</label>
-        <input id="google-client-id" type="text">
-        <label for="google-client-secret">Google OAuth client secret</label>
-        <input id="google-client-secret" type="password">
-        <label for="google-calendar-id">Calendar ID (optional)</label>
-        <input id="google-calendar-id" type="text" placeholder="primary">
-        <button type="button" class="secondary" onclick="connectGoogle()">Connect with Google</button>
-      </div>
-
-      <button type="button" onclick="saveSettings()">Save</button>
-      <div class="save-msg" id="save-msg">Saved.</div>
+      <button type="button" onclick="saveCoreSettings()">Save</button>
+      <div class="save-msg" id="core-save-msg">Saved.</div>
     </div>
+
+    <!-- Plugin cards (settings form + the calendar plugin's events view)
+         are injected here by renderPlugins(). A plugin's settings form is
+         fully generic (built from its settings_schema); the "Upcoming
+         events" list is the one plugin-aware bit of UI left -- a future
+         plugin wanting its own dashboard view would need a small addition
+         here, same as calendar's. -->
+    <div id="plugins"></div>
 
     <div class="card">
       <h2>Recent conversations</h2>
@@ -143,24 +118,7 @@
         <div class="label">Whisper model</div><div>${status.whisper_model}</div>
         <div class="label">Anthropic key</div>
         <div><span class="dot ${status.anthropic_configured ? 'ok' : 'bad'}"></span>${status.anthropic_configured ? 'Configured' : 'Not set'}</div>
-        <div class="label">Calendar</div>
-        <div><span class="dot ${status.calendar_configured ? 'ok' : 'bad'}"></span>${status.calendar_configured ? 'Connected' : 'Not configured'}</div>
       `;
-    }
-
-    async function loadCalendar() {
-      const events = await fetch('/api/calendar/events').then(r => r.json());
-      const el = document.getElementById('calendar-events');
-      if (!events.length) {
-        el.innerHTML = '<div class="empty">No upcoming events, or calendar not configured.</div>';
-        return;
-      }
-      el.innerHTML = events.map(e => `
-        <div class="event">
-          <div class="when">${new Date(e.start).toLocaleString()}</div>
-          <div>${escapeHtml(e.summary)}</div>
-        </div>
-      `).join('');
     }
 
     async function loadHistory() {
@@ -179,54 +137,118 @@
       `).join('');
     }
 
-    async function loadSettings() {
+    async function loadCoreSettings() {
       const config = await fetch('/api/settings').then(r => r.json());
       document.getElementById('claude-model').value = config.claude_model || '';
-      document.getElementById('calendar-provider').value = config.calendar_provider || 'none';
-      document.getElementById('caldav-url').value = config.caldav_url || '';
-      document.getElementById('caldav-username').value = config.caldav_username || '';
-      document.getElementById('caldav-calendar-name').value = config.caldav_calendar_name || '';
-      document.getElementById('google-client-id').value = config.google_client_id || '';
-      document.getElementById('google-calendar-id').value = config.google_calendar_id || '';
-      updateProviderFields();
     }
 
-    function updateProviderFields() {
-      const provider = document.getElementById('calendar-provider').value;
-      document.getElementById('caldav-fields').classList.toggle('active', provider === 'caldav');
-      document.getElementById('google-fields').classList.toggle('active', provider === 'google');
-    }
-    document.getElementById('calendar-provider').addEventListener('change', updateProviderFields);
-
-    async function saveSettings() {
-      const body = {
-        claude_model: document.getElementById('claude-model').value,
-        calendar_provider: document.getElementById('calendar-provider').value,
-        caldav_url: document.getElementById('caldav-url').value,
-        caldav_username: document.getElementById('caldav-username').value,
-        caldav_calendar_name: document.getElementById('caldav-calendar-name').value,
-        google_client_id: document.getElementById('google-client-id').value,
-        google_calendar_id: document.getElementById('google-calendar-id').value,
-      };
+    async function saveCoreSettings() {
+      const body = { claude_model: document.getElementById('claude-model').value };
       const key = document.getElementById('anthropic-key').value;
       if (key) body.anthropic_api_key = key;
-      const caldavPassword = document.getElementById('caldav-password').value;
-      if (caldavPassword) body.caldav_password = caldavPassword;
-      const googleSecret = document.getElementById('google-client-secret').value;
-      if (googleSecret) body.google_client_secret = googleSecret;
-
       await fetch('/api/settings', {
         method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body),
       });
-      const msg = document.getElementById('save-msg');
-      msg.style.display = 'block';
-      setTimeout(() => { msg.style.display = 'none'; }, 2000);
+      flashSaved('core-save-msg');
       loadStatus();
-      loadCalendar();
     }
 
-    function connectGoogle() {
-      window.open('/api/calendar/google/login', '_blank');
+    function fieldInputId(pluginId, key) { return `field-${pluginId}-${key}`; }
+
+    function renderField(pluginId, field) {
+      if (field.type === 'button') {
+        return `<button type="button" class="secondary" onclick="window.open('${field.button_url}', '_blank')">${field.button_label}</button>`;
+      }
+      const id = fieldInputId(pluginId, field.key);
+      const labelHtml = field.label ? `<label for="${id}">${escapeHtml(field.label)}</label>` : '';
+      if (field.type === 'select') {
+        const options = (field.options || []).map(o =>
+          `<option value="${escapeHtml(o.value)}" ${o.value === field.value ? 'selected' : ''}>${escapeHtml(o.label)}</option>`
+        ).join('');
+        return `${labelHtml}<select id="${id}" data-key="${field.key}">${options}</select>`;
+      }
+      const value = field.type === 'password' ? '' : (field.value || '');
+      const placeholder = field.type === 'password' && field.value ? field.value : (field.placeholder || '');
+      return `${labelHtml}<input id="${id}" type="${field.type}" data-key="${field.key}" value="${escapeHtml(value)}" placeholder="${escapeHtml(placeholder)}">`;
+    }
+
+    function applyShowIf(pluginId, fields) {
+      for (const field of fields) {
+        if (!field.show_if) continue;
+        const [depKey, expected] = field.show_if;
+        const depEl = document.getElementById(fieldInputId(pluginId, depKey));
+        const wrapper = document.getElementById(`${fieldInputId(pluginId, field.key)}-wrap`);
+        if (!depEl || !wrapper) continue;
+        wrapper.hidden = depEl.value !== expected;
+      }
+    }
+
+    async function renderPlugins() {
+      const pluginList = await fetch('/api/plugins').then(r => r.json());
+      const container = document.getElementById('plugins');
+      container.innerHTML = pluginList.map(plugin => `
+        <div class="card">
+          <h2><span class="dot ${plugin.configured ? 'ok' : 'bad'}"></span>${escapeHtml(plugin.name)}</h2>
+          <p class="plugin-desc">${escapeHtml(plugin.description)}</p>
+          ${plugin.fields.map(f => `<div class="field" id="${fieldInputId(plugin.id, f.key)}-wrap">${renderField(plugin.id, f)}</div>`).join('')}
+          <button type="button" onclick="savePluginSettings('${plugin.id}')">Save</button>
+          <div class="save-msg" id="save-msg-${plugin.id}">Saved.</div>
+          ${plugin.id === 'calendar' ? `
+            <h2 style="margin-top:24px">Upcoming events</h2>
+            <div id="calendar-events"><div class="empty">Loading...</div></div>
+          ` : ''}
+        </div>
+      `).join('');
+
+      for (const plugin of pluginList) {
+        applyShowIf(plugin.id, plugin.fields);
+        for (const field of plugin.fields) {
+          if (field.type !== 'select') continue;
+          const el = document.getElementById(fieldInputId(plugin.id, field.key));
+          el.addEventListener('change', () => applyShowIf(plugin.id, plugin.fields));
+        }
+      }
+
+      if (pluginList.some(p => p.id === 'calendar')) {
+        loadCalendarEvents();
+      }
+    }
+
+    async function savePluginSettings(pluginId) {
+      const inputs = document.querySelectorAll(`[id^="field-${pluginId}-"]`);
+      const body = {};
+      inputs.forEach(el => { if (el.dataset.key) body[el.dataset.key] = el.value; });
+      await fetch(`/api/plugins/${pluginId}/settings`, {
+        method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body),
+      });
+      flashSaved(`save-msg-${pluginId}`);
+      renderPlugins();
+    }
+
+    async function loadCalendarEvents() {
+      const data = await fetch('/api/plugins/calendar/view').then(r => r.json());
+      const el = document.getElementById('calendar-events');
+      const events = data.events || [];
+      if (data.error) {
+        el.innerHTML = `<div class="empty">Couldn't load events: ${escapeHtml(data.error)}</div>`;
+        return;
+      }
+      if (!events.length) {
+        el.innerHTML = '<div class="empty">No upcoming events, or calendar not configured.</div>';
+        return;
+      }
+      el.innerHTML = events.map(e => `
+        <div class="event">
+          <div class="when">${new Date(e.start).toLocaleString()}</div>
+          <div>${escapeHtml(e.summary)}</div>
+        </div>
+      `).join('');
+    }
+
+    function flashSaved(id) {
+      const msg = document.getElementById(id);
+      msg.style.display = 'block';
+      setTimeout(() => { msg.style.display = 'none'; }, 2000);
     }
 
     function escapeHtml(text) {
@@ -236,9 +258,9 @@
     }
 
     loadStatus();
-    loadCalendar();
     loadHistory();
-    loadSettings();
+    loadCoreSettings();
+    renderPlugins();
   </script>
 </body>
 </html>

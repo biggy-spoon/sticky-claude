@@ -11,6 +11,11 @@ formal process.
 - **Feature ideas**: open an issue first for anything nontrivial (new
   calendar provider, UI redesign, etc.) so we can talk through the
   approach before you sink time into it.
+- **New plugins**: giving Claude a new capability (todo lists, smart
+  home, whatever) almost certainly means writing a plugin rather than
+  touching `app.py` -- see `backend/plugins/base.py` for the contract and
+  `backend/plugins/calendar_plugin.py` for a worked example. Still worth
+  an issue first if it's a bigger integration.
 - **Docs fixes**: just open a PR, no need to ask first.
 - **Code**: see below.
 

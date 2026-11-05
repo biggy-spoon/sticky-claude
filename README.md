@@ -22,13 +22,15 @@ calendar and it actually will.
   browser-based setup page for WiFi credentials and your backend's
   address. Settings are saved to the device's flash.
 - **A web dashboard** on the backend: conversation history, device
-  status, upcoming calendar events, and editable settings (API key,
-  Claude model, calendar connection) — no `.env` editing or restart
-  needed for those.
-- **Calendar integration**: connect either CalDAV (iCloud, Fastmail,
-  Nextcloud, or any other CalDAV server) or Google Calendar, and Claude
-  can create and read events by voice — "add a dentist appointment at
-  3pm on the 24th" actually lands on your calendar.
+  status, editable core settings (API key, Claude model), and every
+  plugin's own settings and data view (calendar's is upcoming events) —
+  no `.env` editing or restart needed for those.
+- **A plugin system** for giving Claude new capabilities: calendar
+  access (CalDAV or Google Calendar) is the first plugin — connect one
+  and Claude can create and read events by voice, "add a dentist
+  appointment at 3pm on the 24th" actually lands on your calendar — and
+  writing a new plugin (todo lists, smart home, whatever) doesn't
+  require touching the core backend. See `backend/plugins/`.
 - **Runs on hardware you already have**: the backend is a small FastAPI
   service meant for a Raspberry Pi or a ZimaOS box you already leave on.
 
@@ -94,8 +96,9 @@ including known gaps and calendar provider setup.
 
 - `firmware/` — ESP-IDF (C++) firmware: button, mic, WiFi, captive
   portal, LVGL UI, ePaper driver.
-- `backend/` — FastAPI service: transcription, Claude calls with
-  calendar tool-use, SQLite-backed dashboard/history/settings.
+- `backend/` — FastAPI service: transcription, Claude calls, a plugin
+  system (`backend/plugins/`, calendar is the first plugin), and a
+  SQLite-backed dashboard/history/settings.
 - `docs/ARCHITECTURE.md` — hardware details and design notes.
 
 ## Status

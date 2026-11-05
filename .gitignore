@@ -6,7 +6,7 @@ firmware/managed_components/
 firmware/dependencies.lock
 
 # Python
-backend/__pycache__/
+**/__pycache__/
 backend/*.pyc
 backend/.venv/
 backend/.env

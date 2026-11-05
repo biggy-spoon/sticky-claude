@@ -30,19 +30,35 @@ docker run -p 8000:8000 --env-file .env sticky-claude-backend
 ## Dashboard
 
 Open `http://<backend-host>:8000/dashboard` in a browser. It shows recent
-conversations, device status, upcoming calendar events, and lets you edit
-the Anthropic API key, Claude model, and calendar connection without
-touching `.env` or restarting (the Whisper settings are the exception --
-those load once at startup, so changing them still needs a restart).
+conversations, device status, each installed plugin's settings (and, for
+plugins that have one, a data view — calendar's is "Upcoming events"),
+and lets you edit the Anthropic API key and Claude model. None of this
+needs touching `.env` or restarting (the Whisper settings are the
+exception — those load once at startup, so changing them still needs a
+restart).
 
 **There is no authentication on the dashboard or its API.** It's meant for
 your home LAN, same trust model as the device's own setup portal. Don't
 port-forward it to the public internet without putting something in front
 of it.
 
-### Calendar setup
+## Plugins
 
-Pick one in the dashboard's Settings card:
+Claude's capabilities beyond plain conversation — right now, calendar
+access — come from plugins (`plugins/`). A plugin declares the Claude
+tools it contributes, the settings fields it needs (rendered generically
+by the dashboard — a plugin with only text/password fields needs zero
+frontend changes), and optionally extra HTTP routes for its own setup
+flow (calendar's Google OAuth callback, for example).
+
+See `plugins/base.py` for the contract and `plugins/calendar_plugin.py`
+for the reference implementation. Adding a new built-in plugin is:
+write a class implementing `plugins.base.Plugin`, then register it in
+`plugins/__init__.py`'s `_register_built_ins()`.
+
+### Calendar plugin setup
+
+Pick one in the dashboard's Calendar card:
 
 **CalDAV** (iCloud, Fastmail, Nextcloud, or any other CalDAV server):
 1. For iCloud specifically: go to [appleid.apple.com](https://appleid.apple.com) →
@@ -58,8 +74,8 @@ Pick one in the dashboard's Settings card:
 1. In the [Google Cloud Console](https://console.cloud.google.com/), create
    a project (or use an existing one), enable the Calendar API, and create
    an OAuth 2.0 Client ID (type: Web application). Add
-   `http://<backend-host>:8000/api/calendar/google/callback` as an
-   authorized redirect URI.
+   `http://<backend-host>:8000/api/plugins/calendar/google/callback` as
+   an authorized redirect URI.
 2. In the dashboard, enter the client ID and secret, save, then click
    "Connect with Google" and sign in. That exchanges a one-time code for a
    refresh token, which gets stored so the backend can call the Calendar
@@ -76,8 +92,16 @@ about it.
 - `POST /converse` — body is raw WAV bytes (16-bit PCM mono, see firmware's
   `recording_service`). Returns JSON `{"transcript": "...", "reply": "..."}`.
 - `GET /dashboard` — the web dashboard.
-- `GET /api/history`, `GET /api/status`, `GET`/`POST /api/settings`,
-  `GET /api/calendar/events` — dashboard data, also usable directly.
+- `GET /api/history`, `GET /api/status`, `GET`/`POST /api/settings` —
+  core data, also usable directly.
+- `GET /api/plugins` — every plugin's id/name/description/configured
+  state and settings schema (what the dashboard renders its forms from).
+- `POST /api/plugins/{id}/settings` — save a plugin's settings.
+- `GET /api/plugins/{id}/view` — a plugin's dashboard data, if it has one
+  (calendar returns `{"events": [...]}`).
+- Plugins may add their own routes too — calendar adds
+  `GET /api/plugins/calendar/google/login` and `/callback` for its OAuth
+  flow.
 
 ## Sizing note
 

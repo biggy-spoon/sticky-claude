@@ -25,6 +25,13 @@ tracked under Unreleased until there's a first stable cut.
   CalDAV (iCloud, Fastmail, Nextcloud, etc.) or Google Calendar (OAuth).
   Backed by a new SQLite store for conversation history, device status,
   and mutable settings.
+- Plugin system (`backend/plugins/`): generalized the calendar
+  integration into the first implementation of a `Plugin` contract
+  (tool definitions, a declarative settings schema the dashboard renders
+  generically, optional custom routes). `app.py`'s `/converse` handler
+  and the dashboard's settings UI are now plugin-generic -- neither has
+  calendar-specific logic left. A new plugin needs no backend or
+  dashboard changes beyond implementing the contract and registering it.
 
 ### Fixed
 - `epaper_display`'s SSD1677 command sequence, written from generic
@@ -55,6 +62,10 @@ tracked under Unreleased until there's a first stable cut.
 - Backend: `anthropic==0.40.0` throws `AttributeError` parsing any
   response containing `tool_use` blocks on this stack (its
   discriminated-union handling). Upgraded to `2.5.0`.
+- The calendar plugin's dashboard view (`GET /api/plugins/calendar/view`)
+  didn't catch provider exceptions, so a misconfigured or temporarily
+  unreachable calendar crashed the whole endpoint with a 500 instead of
+  showing a clean error in the dashboard.
 
 ## Earlier
 

@@ -89,23 +89,39 @@ pixels rather than bytes. Because it's a port of GPLv3 code, that one
 directory is GPLv3 (see its own `LICENSE` file) while the rest of this
 repository is MIT.
 
-## Backend: dashboard, calendar, and storage
+## Backend: dashboard, plugins, and storage
 
 - `storage.py` — SQLite: conversation history, device last-seen/IP, and
-  a settings key-value table.
+  a flat settings key-value table.
 - `settings.py` — layers the settings table over `.env` as a first-run
-  fallback, so the Anthropic key, Claude model, and calendar config are
-  hot-editable from the dashboard without a restart. Whisper settings
-  stay env-only since the model loads once at startup.
-- `calendar_service.py` — provider-agnostic `CalendarProvider` interface
-  with `CalDavProvider` (iCloud/Fastmail/Nextcloud/etc, via the `caldav`
+  fallback, so the Anthropic key and Claude model are hot-editable from
+  the dashboard without a restart. Whisper settings stay env-only since
+  the model loads once at startup.
+- `plugins/` — how Claude gets capabilities beyond plain conversation.
+  `base.py` defines the contract: a plugin declares the Claude tools it
+  contributes (`get_tools()`/`execute_tool()`), a declarative settings
+  schema the dashboard renders generically (`settings_schema()`,
+  including conditional fields and action buttons), and optionally its
+  own HTTP routes (`register_routes()`) for things like an OAuth
+  callback. `app.py`'s `/converse` handler collects tools from every
+  *configured* plugin, offers them all to Claude in one request, and
+  routes any `tool_use` block back to whichever plugin owns that tool
+  name — `app.py` itself has no plugin-specific logic.
+- `calendar_plugin.py` — the first (and so far only) plugin, implementing
+  `create_calendar_event`/`list_calendar_events` on top of
+  `calendar_service.py`'s provider-agnostic `CalendarProvider` interface:
+  `CalDavProvider` (iCloud/Fastmail/Nextcloud/etc, via the `caldav`
   package building ICS with `icalendar`) and `GoogleCalendarProvider`
-  (OAuth, via `google-api-python-client`). Which one is active is just a
-  setting.
+  (OAuth, via `google-api-python-client`). `calendar_service.py` stays
+  pure domain logic with no knowledge of the plugin contract; the plugin
+  is a thin adapter over it.
 - `dashboard.html` + the `/api/*` routes in `app.py` — a single
-  dependency-free HTML/JS page served at `/dashboard`. No authentication
-  — same trust model as the device's own setup portal, meant for the
-  home LAN only.
+  dependency-free HTML/JS page served at `/dashboard`. Settings forms are
+  built client-side from each plugin's schema; a plugin-specific data
+  view (like calendar's "Upcoming events") is the one place the
+  dashboard still has to know a plugin by name rather than purely by
+  schema. No authentication — same trust model as the device's own setup
+  portal, meant for the home LAN only.
 
 ## Open items
 
