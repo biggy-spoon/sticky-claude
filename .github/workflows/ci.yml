@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  firmware-build:
+    name: Build firmware (esp32s3)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build with ESP-IDF
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.3
+          target: esp32s3
+          path: "firmware"
+
+  backend-checks:
+    name: Backend sanity checks
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Compile check
+        run: python -m py_compile app.py calendar_service.py settings.py storage.py
+      - name: Import check
+        # No ANTHROPIC_API_KEY set on purpose: app.py must not crash at
+        # import/startup time without one, only /converse should fail
+        # until it's configured (same thing the backend README documents).
+        run: python -c "import app"

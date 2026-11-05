@@ -2,26 +2,36 @@
 
 ESP-IDF (C++) firmware for the Seeed Studio reTerminal Sticky (ESP32-S3R8).
 Hold the AI/record button, speak, release — the clip gets POSTed to the
-`backend` service, which transcribes it and asks Claude, and the reply comes
-back as JSON.
+`backend` service, which transcribes it and asks Claude (with calendar
+tool-use if you've connected one), and the reply renders on the ePaper
+screen.
 
 ## Build
 
 Requires [ESP-IDF](https://docs.espressif.com/projects/esp-idf/en/stable/esp32s3/get-started/index.html)
-v5.3.x (this was written against, and `idf.py build` verified against, v5.3's
-I2S PDM RX API). `idf.py build` completes cleanly as of this writing —
-bootloader, partition table, and app binary all generate with flash to
-spare. It has **not** been flashed to real hardware or run on the device,
-so bring-up issues (wrong pin, display not lighting up, mic silent) are
-still expected; only compile-time correctness has been checked.
+v5.3.x. Built, flashed, and run on a real device — the full
+record → transcribe → Claude → display loop is confirmed working on
+hardware, not just compiled.
 
 ```bash
 cd firmware
 idf.py set-target esp32s3
-idf.py menuconfig   # under "sticky-claude": set WiFi SSID/password and the backend URL
 idf.py build
 idf.py -p /dev/ttyACM0 flash monitor
 ```
+
+No WiFi/backend config step needed before flashing — the device handles
+that itself on first boot (see "First-run setup" below).
+
+### First-run setup
+
+On first boot (or after a factory reset / NVS erase), the device opens an
+open WiFi access point named `StickyClaude-Setup`. Connect to it from a
+phone or laptop; a setup page should open automatically (the captive
+portal trick), or browse to `http://192.168.4.1/` manually. Enter your
+real WiFi credentials and your backend's `/converse` URL
+(e.g. `http://192.168.1.50:8000/converse`); the device saves this to NVS
+and reboots into normal operation.
 
 ## Architecture
 
@@ -31,38 +41,40 @@ idf.py -p /dev/ttyACM0 flash monitor
 | `button_service` | Polls the AI button, debounced; press-start/press-end callbacks |
 | `pdm_mic` | I2S PDM RX capture, 16kHz mono 16-bit |
 | `recording_service` | PSRAM clip buffer + WAV encoding |
-| `wifi_service` | Blocking WiFi STA connect |
+| `settings_service` | NVS-backed WiFi/backend settings, written by the portal |
+| `captive_portal` | First-run AP + DNS hijack + HTTP setup form |
+| `wifi_service` | STA connect (using `settings_service` values) + SoftAP mode |
 | `assistant_service` | POSTs the WAV to the backend, parses `{transcript, reply}` |
 | `epaper_display` | SPI transport + SSD1677 command set + 1bpp framebuffer |
-| `main` | Wires button hold → record → upload → (eventually) display |
+| `ui` | LVGL screens (idle/recording/thinking/reply) rendered via `epaper_display` |
+| `main` | Wires button hold → record → upload → display, and first-run routing |
 
 ## Known gaps
 
-This is a first pass, not a finished product — these are the pieces that
-need real hardware time:
-
-1. **Text rendering is not implemented.** `main.cpp` only draws a black
-   status bar while busy, as a placeholder. To actually show Claude's reply
-   you need a font. Recommended: pull in
-   [u8g2](https://github.com/olikraus/u8g2) (BSD-licensed) as a managed
-   component and drive it via its custom-display callback against
-   `epaper_display`'s framebuffer, rather than hand-writing glyph bitmaps.
-2. **The ePaper init/refresh command sequence is unverified.** It follows
-   the standard SSD16xx opcode set but was written without a real panel to
-   test against — expect to debug command order, timing, or the border
-   waveform byte. If it doesn't light up, compare against
-   [the `folloup-sticky` project's `ssd1677_driver.cpp`](https://github.com/alxv2016/folloup-sticky/blob/main/components/epaper_panel/ssd1677_driver.cpp),
-   which targets the same panel/controller on the same board and is known
-   to work — note that project is **GPLv3**, so directly porting its code
-   (rather than just reading it for reference) would mean this component
-   needs to be GPLv3 too.
-3. **No pre-roll buffering.** Recording starts exactly when the capture
+1. **No pre-roll buffering.** Recording starts exactly when the capture
    task notices the button is down, so the first ~20-50ms of speech right
    at press can get clipped. Followup's `recording_service` solves this
    with a continuously-filled ring buffer armed ahead of the long-press
    threshold; worth porting that pattern if clipped first words become
    annoying in practice.
-4. **Button timing not tuned.** `kMinHoldMs` (250ms) is a guess to filter
-   accidental taps; adjust against how the button actually feels in hand.
-5. **No touch, SD card, or sensor support wired up** — the board has them,
+2. **Button timing not finely tuned.** `kMinHoldMs` (250ms) filters
+   accidental taps; adjust against how the button actually feels in
+   hand. Also: the AI/record button is physically the same pin as the
+   device's power button, which has its own hardware-level long-hold
+   behavior independent of firmware — holding it for several seconds can
+   trigger a hardware power cycle unrelated to recording. Keep test
+   holds in the roughly 0.3-3 second range.
+3. **No touch, SD card, or sensor support wired up** — the board has them,
    this project doesn't use them (out of scope for the voice-note flow).
+4. **No partial e-paper refresh.** Every screen change is a full refresh
+   (a few seconds). Fine for this project's rate of UI changes; would
+   need real work to support faster partial updates if that ever
+   mattered here.
+
+## Licensing note
+
+`components/epaper_display` is **GPLv3**, not MIT like the rest of this
+repository — its SSD1677 command sequence is ported from the GPLv3
+[`folloup-sticky`](https://github.com/alxv2016/folloup-sticky) project.
+See that directory's own `LICENSE` file, and `docs/ARCHITECTURE.md` for
+why a from-scratch version didn't work.
