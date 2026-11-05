@@ -42,15 +42,27 @@ void TickTimerCallback(void*) { lv_tick_inc(kTickPeriodMs); }
 // redraw covering the whole screen, so it's safe to trigger the real
 // panel refresh at the end of every call.
 void FlushCb(lv_disp_drv_t* disp_drv, const lv_area_t* area, lv_color_t* color_p) {
+    uint32_t black_count = 0;
+    uint32_t pixel_count = 0;
     for (lv_coord_t y = area->y1; y <= area->y2; ++y) {
         for (lv_coord_t x = area->x1; x <= area->x2; ++x) {
             const lv_color_t color = *color_p++;
             const bool black = lv_color_brightness(color) < 128;
             epaper_display::SetPixel(x, y, black);
+            ++pixel_count;
+            if (black) {
+                ++black_count;
+            }
         }
     }
+    ESP_LOGI(kTag, "flush: area=(%d,%d)-(%d,%d) pixels=%lu black=%lu", area->x1, area->y1,
+             area->x2, area->y2, static_cast<unsigned long>(pixel_count),
+             static_cast<unsigned long>(black_count));
 
-    epaper_display::FullRefresh();
+    const esp_err_t err = epaper_display::FullRefresh();
+    if (err != ESP_OK) {
+        ESP_LOGE(kTag, "FullRefresh failed: %s", esp_err_to_name(err));
+    }
     lv_disp_flush_ready(disp_drv);
 }
 
@@ -145,8 +157,10 @@ void BuildErrorScreen() {
 }
 
 void ShowScreen(lv_obj_t* screen) {
+    ESP_LOGI(kTag, "ShowScreen: loading %p", screen);
     lv_scr_load(screen);
     lv_refr_now(nullptr);
+    ESP_LOGI(kTag, "ShowScreen: refresh done");
 }
 
 }  // namespace

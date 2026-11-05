@@ -1,3 +1,10 @@
+// The SSD1677 init/refresh sequence below is ported from the folloup-sticky
+// project's ssd1677_driver.cpp (https://github.com/alxv2016/folloup-sticky),
+// which is confirmed working on this exact board/panel. That project is
+// GPLv3-licensed; per its terms, this file -- as a derivative work -- is
+// also licensed under the GNU GPLv3 (see LICENSE in this directory), unlike
+// the rest of this repository (MIT). The original author's copyright is
+// retained in spirit: this is a port, not independent work.
 #include "epaper_display.h"
 
 #include <algorithm>
@@ -18,19 +25,36 @@ constexpr uint32_t kSpiClockHz = 4 * 1000 * 1000;
 constexpr uint32_t kBusyPollIntervalMs = 20;
 constexpr uint32_t kBusyTimeoutMs = 20000;
 
-// SSD1677-family command opcodes (standard SSD16xx set). Unverified against
-// real hardware -- see header comment.
-constexpr uint8_t kCmdSwReset = 0x12;
+// SSD1677 command opcodes, and the register values below, ported from the
+// proven folloup-sticky driver (see file header).
+constexpr uint8_t kCmdBoosterSoftStart = 0x0C;
 constexpr uint8_t kCmdDriverOutputControl = 0x01;
 constexpr uint8_t kCmdDataEntryMode = 0x11;
+constexpr uint8_t kCmdSwReset = 0x12;
+constexpr uint8_t kCmdTemperatureSensorSelect = 0x18;
+constexpr uint8_t kCmdMasterActivate = 0x20;
+constexpr uint8_t kCmdDisplayUpdateControl1 = 0x21;
+constexpr uint8_t kCmdDisplayUpdateControl2 = 0x22;
 constexpr uint8_t kCmdSetRamXAddress = 0x44;
 constexpr uint8_t kCmdSetRamYAddress = 0x45;
 constexpr uint8_t kCmdSetRamXCounter = 0x4E;
 constexpr uint8_t kCmdSetRamYCounter = 0x4F;
-constexpr uint8_t kCmdBorderWaveform = 0x3C;
-constexpr uint8_t kCmdDisplayUpdateControl2 = 0x22;
-constexpr uint8_t kCmdMasterActivate = 0x20;
-constexpr uint8_t kCmdWriteRamBw = 0x24;
+constexpr uint8_t kCmdBorderWaveformFull = 0x3C;
+constexpr uint8_t kCmdWriteRamNew = 0x24;  // "current" image plane
+constexpr uint8_t kCmdWriteRamOld = 0x26;  // "previous" image plane -- the
+
+// SSD1677 computes its full-refresh waveform from the difference between
+// these two planes. Writing only kCmdWriteRamNew (as an earlier version of
+// this driver did) leaves the old plane stale/undefined, so the controller
+// sees no meaningful change and the SPI transfer completes with no visible
+// update -- confirmed on real hardware. A full refresh always writes the
+// same framebuffer to both planes.
+constexpr uint8_t kBoosterSoftStart[] = {0xAE, 0xC7, 0xC3, 0xC0, 0x80};
+constexpr uint8_t kDataEntryModeFull = 0x01;
+constexpr uint8_t kBorderWaveformFullValue = 0x01;
+constexpr uint8_t kTemperatureSelectInternal = 0x80;
+constexpr uint8_t kDisplayUpdateCtrl1Full[] = {0x40, 0x00};
+constexpr uint8_t kDisplayUpdateCtrl2Full = 0xF7;
 
 spi_device_handle_t s_spi = nullptr;
 uint8_t* s_framebuffer = nullptr;  // 1bpp, BOARD_EPD_BUFFER_LEN bytes, 1 = white
@@ -71,6 +95,14 @@ esp_err_t SendData(const uint8_t* data, size_t len) {
 
 esp_err_t SendDataByte(uint8_t byte) { return SendData(&byte, 1); }
 
+esp_err_t SendCommandWithData(uint8_t command, const uint8_t* data, size_t len) {
+    esp_err_t err = SendCommand(command);
+    if (err != ESP_OK) {
+        return err;
+    }
+    return SendData(data, len);
+}
+
 void WaitWhileBusy() {
     uint32_t waited_ms = 0;
     while (gpio_get_level(BOARD_EPD_BUSY_PIN) == 1 && waited_ms < kBusyTimeoutMs) {
@@ -86,7 +118,7 @@ void HardwareReset() {
     gpio_set_level(BOARD_EPD_RST_PIN, 0);
     vTaskDelay(pdMS_TO_TICKS(10));
     gpio_set_level(BOARD_EPD_RST_PIN, 1);
-    vTaskDelay(pdMS_TO_TICKS(10));
+    vTaskDelay(pdMS_TO_TICKS(50));
 }
 
 esp_err_t ConfigureGpio() {
@@ -124,10 +156,45 @@ esp_err_t ConfigureSpi() {
     return spi_bus_add_device(BOARD_EPD_SPI_HOST, &dev_cfg, &s_spi);
 }
 
-// Standard SSD16xx bring-up sequence: reset, driver output control (panel
-// height), data entry mode, full-window RAM address range, border waveform,
-// and the "clear display" update sequence. See header note: unverified.
-esp_err_t PanelInitSequence() {
+esp_err_t SetWindow(uint16_t x_start, uint16_t y_start, uint16_t x_end, uint16_t y_end) {
+    const uint8_t ram_x_window[] = {
+        static_cast<uint8_t>(x_start & 0xFF),
+        static_cast<uint8_t>(x_start >> 8),
+        static_cast<uint8_t>(x_end & 0xFF),
+        static_cast<uint8_t>(x_end >> 8),
+    };
+    const uint8_t ram_y_window[] = {
+        static_cast<uint8_t>(y_start & 0xFF),
+        static_cast<uint8_t>(y_start >> 8),
+        static_cast<uint8_t>(y_end & 0xFF),
+        static_cast<uint8_t>(y_end >> 8),
+    };
+    esp_err_t err = SendCommandWithData(kCmdSetRamXAddress, ram_x_window, sizeof(ram_x_window));
+    if (err != ESP_OK) {
+        return err;
+    }
+    return SendCommandWithData(kCmdSetRamYAddress, ram_y_window, sizeof(ram_y_window));
+}
+
+esp_err_t SetCursor(uint16_t x_start, uint16_t y_start) {
+    const uint8_t cursor_x[] = {static_cast<uint8_t>(x_start & 0xFF),
+                                static_cast<uint8_t>(x_start >> 8)};
+    const uint8_t cursor_y[] = {static_cast<uint8_t>(y_start & 0xFF),
+                                static_cast<uint8_t>(y_start >> 8)};
+    esp_err_t err = SendCommandWithData(kCmdSetRamXCounter, cursor_x, sizeof(cursor_x));
+    if (err != ESP_OK) {
+        return err;
+    }
+    return SendCommandWithData(kCmdSetRamYCounter, cursor_y, sizeof(cursor_y));
+}
+
+// Full re-init before every full refresh (including a hardware reset) --
+// this SSD1677 needs that to produce a clean waveform each time, per the
+// ported reference driver. Window/cursor: X spans [0, width-1] in pixels
+// (NOT bytes -- confirmed from the reference, a wrong assumption in an
+// earlier version of this file cost real debugging time), Y spans
+// [height-1, 0] to match data-entry mode 0x01 (Y decrements).
+esp_err_t InitFull() {
     HardwareReset();
     WaitWhileBusy();
 
@@ -135,42 +202,37 @@ esp_err_t PanelInitSequence() {
     if (err != ESP_OK) return err;
     WaitWhileBusy();
 
-    err = SendCommand(kCmdDriverOutputControl);
-    if (err != ESP_OK) return err;
     const uint16_t rows_minus_one = BOARD_EPD_HEIGHT - 1;
-    SendDataByte(rows_minus_one & 0xFF);
-    SendDataByte((rows_minus_one >> 8) & 0xFF);
-    SendDataByte(0x00);
+    const uint8_t driver_output[] = {
+        static_cast<uint8_t>(rows_minus_one & 0xFF),
+        static_cast<uint8_t>(rows_minus_one >> 8),
+        0x02,
+    };
 
-    err = SendCommand(kCmdDataEntryMode);
+    err = SendCommandWithData(kCmdBoosterSoftStart, kBoosterSoftStart, sizeof(kBoosterSoftStart));
     if (err != ESP_OK) return err;
-    SendDataByte(0x03);  // X increment, Y increment
-
-    err = SendCommand(kCmdSetRamXAddress);
+    err = SendCommandWithData(kCmdDriverOutputControl, driver_output, sizeof(driver_output));
     if (err != ESP_OK) return err;
-    SendDataByte(0x00);
-    SendDataByte((BOARD_EPD_WIDTH / 8) - 1);
-
-    err = SendCommand(kCmdSetRamYAddress);
+    err = SendCommandWithData(kCmdDataEntryMode, &kDataEntryModeFull, 1);
     if (err != ESP_OK) return err;
-    SendDataByte(0x00);
-    SendDataByte(0x00);
-    SendDataByte((BOARD_EPD_HEIGHT - 1) & 0xFF);
-    SendDataByte(((BOARD_EPD_HEIGHT - 1) >> 8) & 0xFF);
-
-    err = SendCommand(kCmdBorderWaveform);
+    err = SetWindow(0, BOARD_EPD_HEIGHT - 1, BOARD_EPD_WIDTH - 1, 0);
     if (err != ESP_OK) return err;
-    SendDataByte(0x05);
-
-    err = SendCommand(kCmdSetRamXCounter);
+    err = SendCommandWithData(kCmdBorderWaveformFull, &kBorderWaveformFullValue, 1);
     if (err != ESP_OK) return err;
-    SendDataByte(0x00);
-
-    err = SendCommand(kCmdSetRamYCounter);
+    err = SendCommandWithData(kCmdTemperatureSensorSelect, &kTemperatureSelectInternal, 1);
     if (err != ESP_OK) return err;
-    SendDataByte(0x00);
-    SendDataByte(0x00);
+    return SetCursor(0, BOARD_EPD_HEIGHT - 1);
+}
 
+esp_err_t TurnOnDisplay() {
+    esp_err_t err = SendCommandWithData(kCmdDisplayUpdateControl1, kDisplayUpdateCtrl1Full,
+                                        sizeof(kDisplayUpdateCtrl1Full));
+    if (err != ESP_OK) return err;
+    err = SendCommandWithData(kCmdDisplayUpdateControl2, &kDisplayUpdateCtrl2Full, 1);
+    if (err != ESP_OK) return err;
+    err = SendCommand(kCmdMasterActivate);
+    if (err != ESP_OK) return err;
+    WaitWhileBusy();
     return ESP_OK;
 }
 
@@ -202,12 +264,6 @@ esp_err_t Init() {
     }
     Clear(false);
 
-    err = PanelInitSequence();
-    if (err != ESP_OK) {
-        ESP_LOGE(kTag, "panel init sequence failed: %s", esp_err_to_name(err));
-        return err;
-    }
-
     ESP_LOGI(kTag, "initialized: %dx%d", BOARD_EPD_WIDTH, BOARD_EPD_HEIGHT);
     return ESP_OK;
 }
@@ -238,24 +294,25 @@ esp_err_t FullRefresh() {
         return ESP_ERR_INVALID_STATE;
     }
 
-    esp_err_t err = SendCommand(kCmdWriteRamBw);
+    esp_err_t err = InitFull();
     if (err != ESP_OK) {
+        ESP_LOGE(kTag, "InitFull failed: %s", esp_err_to_name(err));
         return err;
     }
+
+    // Both planes get the same (new) image: a full refresh establishes a
+    // clean baseline, there is no real "previous" frame to diff against.
+    err = SendCommand(kCmdWriteRamNew);
+    if (err != ESP_OK) return err;
     err = SendData(s_framebuffer, BOARD_EPD_BUFFER_LEN);
-    if (err != ESP_OK) {
-        return err;
-    }
-
-    err = SendCommand(kCmdDisplayUpdateControl2);
     if (err != ESP_OK) return err;
-    SendDataByte(0xF7);  // full display update sequence
 
-    err = SendCommand(kCmdMasterActivate);
+    err = SendCommand(kCmdWriteRamOld);
     if (err != ESP_OK) return err;
-    WaitWhileBusy();
+    err = SendData(s_framebuffer, BOARD_EPD_BUFFER_LEN);
+    if (err != ESP_OK) return err;
 
-    return ESP_OK;
+    return TurnOnDisplay();
 }
 
 }  // namespace epaper_display
