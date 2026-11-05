@@ -4,9 +4,10 @@ and no settings -- it works out of the box). One of the two default
 plugins shipped with the backend, alongside calendar_plugin.py.
 """
 import logging
+from typing import Optional
 
 import storage
-from .base import Plugin
+from .base import DeviceView, DeviceViewItem, Plugin
 
 log = logging.getLogger("sticky-claude.plugins.todo")
 
@@ -89,3 +90,20 @@ class TodoPlugin(Plugin):
             "open": storage.list_todos(done=False),
             "done": storage.list_todos(done=True, limit=10),
         }
+
+    def device_view(self) -> Optional[DeviceView]:
+        open_todos = storage.list_todos(done=False)
+        return DeviceView(
+            view_type="list",
+            title="Todo list",
+            items=[DeviceViewItem(id=str(t["id"]), text=t["text"], checked=False)
+                   for t in open_todos],
+        )
+
+    def device_action(self, item_id: str) -> None:
+        try:
+            todo_id = int(item_id)
+        except ValueError:
+            log.warning("device_action got a non-numeric todo id: %r", item_id)
+            return
+        storage.complete_todo_by_id(todo_id)

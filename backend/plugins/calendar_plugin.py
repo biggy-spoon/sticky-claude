@@ -5,13 +5,19 @@ follow this file's shape.
 """
 import logging
 from datetime import datetime, timedelta, timezone
+from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import RedirectResponse
 
 import calendar_service
 import settings
-from .base import Plugin, SettingField
+from .base import DeviceView, DeviceViewItem, Plugin, SettingField
+
+# Device screens are small and glanceable -- cap how many upcoming events
+# get sent down for the on-device list rather than however many the
+# calendar has in the next 30 days.
+_DEVICE_VIEW_MAX_EVENTS = 15
 
 log = logging.getLogger("sticky-claude.plugins.calendar")
 
@@ -142,6 +148,22 @@ class CalendarPlugin(Plugin):
         return {"events": [{"summary": e.summary, "start": e.start.isoformat(),
                             "end": e.end.isoformat(), "description": e.description}
                            for e in events]}
+
+    def device_view(self) -> Optional[DeviceView]:
+        provider = calendar_service.get_provider()
+        if provider is None:
+            return None
+        try:
+            now = datetime.now(timezone.utc)
+            events = provider.list_events(now, now + timedelta(days=30))
+        except Exception:
+            log.exception("Failed to load calendar events for device view")
+            return None
+        items = [
+            DeviceViewItem(id=str(i), text=f"{e.start.strftime('%a %b %d, %I:%M %p')} {e.summary}")
+            for i, e in enumerate(events[:_DEVICE_VIEW_MAX_EVENTS])
+        ]
+        return DeviceView(view_type="list", title="Calendar", items=items)
 
     def register_routes(self, app: FastAPI) -> None:
         @app.get("/api/plugins/calendar/google/login")

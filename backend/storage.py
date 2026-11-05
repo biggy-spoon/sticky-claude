@@ -154,3 +154,21 @@ def complete_todo(text_match: str) -> Optional[str]:
             (datetime.now(timezone.utc).isoformat(), row["id"]),
         )
         return row["text"]
+
+
+def complete_todo_by_id(todo_id: int) -> bool:
+    """Same as complete_todo(), but by id rather than a text search --
+    the device's Up/Down+tap interaction highlights a specific row and
+    knows its id directly, unlike voice input. Returns False if there's
+    no open todo with that id (already done, or never existed)."""
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT id FROM todos WHERE id = ? AND done = 0", (todo_id,),
+        ).fetchone()
+        if row is None:
+            return False
+        conn.execute(
+            "UPDATE todos SET done = 1, done_at = ? WHERE id = ?",
+            (datetime.now(timezone.utc).isoformat(), todo_id),
+        )
+        return True

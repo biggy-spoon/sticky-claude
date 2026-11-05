@@ -42,6 +42,36 @@ class ToolResult:
     text: str
 
 
+@dataclass
+class DeviceViewItem:
+    """One row in a device-rendered list view (base.DeviceView, below).
+    `checked` is None for a plain (non-interactive) row like a calendar
+    event; True/False for a checkable row like a todo -- that's what
+    tells the firmware whether Up/Down should be able to land on it at
+    all and whether an AI-button tap should toggle it.
+    """
+    id: str
+    text: str
+    checked: Optional[bool] = None
+
+
+@dataclass
+class DeviceView:
+    """A plugin's own on-device screen, shown on the ePaper display when
+    the user pages to it with the device's Up/Down buttons. Deliberately
+    a small declarative payload -- like SettingField for the web
+    dashboard's forms -- rather than letting a plugin send anything it
+    wants: the firmware only ever renders one of a few known
+    `view_type`s, so a plugin (including a third-party one from the
+    plugin hub) can describe a screen but never execute code on the
+    device.
+    """
+    view_type: str  # "text" | "list"
+    title: str
+    body: Optional[str] = None                    # view_type == "text"
+    items: Optional[list[DeviceViewItem]] = None   # view_type == "list"
+
+
 class Plugin(ABC):
     @property
     @abstractmethod
@@ -87,4 +117,21 @@ class Plugin(ABC):
         """Optional: extra data for a plugin-specific dashboard card,
         e.g. calendar's upcoming-events list. Return None if the plugin
         has no dashboard view beyond its settings form."""
+        return None
+
+    def device_view(self) -> Optional[DeviceView]:
+        """Optional: this plugin's own screen on the device's ePaper
+        display, shown when the user pages to it with the Up/Down
+        buttons. Return None for no device screen at all (the plugin is
+        skipped in the on-device rotation) -- the default, so a plugin
+        with no use for a device screen needs to do nothing here."""
+        return None
+
+    def device_action(self, item_id: str) -> None:
+        """Optional: called when the user confirms/toggles a highlighted
+        row (by its DeviceViewItem.id) in this plugin's device_view(),
+        via a short tap of the AI button. Only ever called for an item
+        this plugin's own device_view() returned with `checked` set to
+        True/False -- a plain (checked=None) row never triggers this.
+        Default: no-op, for a plugin whose device screen is read-only."""
         return None

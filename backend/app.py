@@ -266,3 +266,43 @@ def api_plugin_hub() -> dict:
     for entry in entries:
         entry["installed"] = entry.get("id") in installed_ids
     return {"plugins": entries, "error": error}
+
+
+# --- Device screens (Up/Down button navigation on the ePaper panel) ----
+
+@app.get("/api/device/views")
+def api_device_views() -> dict:
+    """Every configured plugin's own on-device screen, in a fixed order
+    (plugin registration order), for the firmware to page through with
+    the Up/Down buttons. The device's own home/conversation screen isn't
+    included -- it's rendered locally by the firmware without a backend
+    round-trip."""
+    views = []
+    for plugin in plugins.all_plugins():
+        if not plugin.is_configured():
+            continue
+        view = plugin.device_view()
+        if view is None:
+            continue
+        views.append({
+            "plugin_id": plugin.id,
+            "view_type": view.view_type,
+            "title": view.title,
+            "body": view.body,
+            "items": [{"id": item.id, "text": item.text, "checked": item.checked}
+                      for item in (view.items or [])],
+        })
+    return {"views": views}
+
+
+@app.post("/api/plugins/{plugin_id}/device-action")
+async def api_plugin_device_action(plugin_id: str, request: Request) -> dict:
+    plugin = plugins.get(plugin_id)
+    if plugin is None:
+        raise HTTPException(status_code=404, detail=f"Unknown plugin: {plugin_id}")
+    body = await request.json()
+    item_id = body.get("item_id")
+    if not item_id:
+        raise HTTPException(status_code=400, detail="item_id is required")
+    plugin.device_action(str(item_id))
+    return {"success": True}
