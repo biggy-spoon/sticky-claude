@@ -107,21 +107,40 @@ repository is MIT.
   *configured* plugin, offers them all to Claude in one request, and
   routes any `tool_use` block back to whichever plugin owns that tool
   name — `app.py` itself has no plugin-specific logic.
-- `calendar_plugin.py` — the first (and so far only) plugin, implementing
-  `create_calendar_event`/`list_calendar_events` on top of
-  `calendar_service.py`'s provider-agnostic `CalendarProvider` interface:
-  `CalDavProvider` (iCloud/Fastmail/Nextcloud/etc, via the `caldav`
-  package building ICS with `icalendar`) and `GoogleCalendarProvider`
-  (OAuth, via `google-api-python-client`). `calendar_service.py` stays
-  pure domain logic with no knowledge of the plugin contract; the plugin
-  is a thin adapter over it.
+  `plugins/__init__.py` doesn't hardcode which plugins exist: it scans
+  every `.py` file in the directory for a `Plugin` subclass and
+  registers whatever it finds. That scan is the entire "install" story
+  for a third-party plugin too — drop a file in, restart, done — and the
+  two built-ins go through the exact same path rather than being
+  special-cased, so the mechanism is what's actually exercised, not just
+  what community code is asked to trust.
+- `calendar_plugin.py` — `create_calendar_event`/`list_calendar_events`
+  on top of `calendar_service.py`'s provider-agnostic `CalendarProvider`
+  interface: `CalDavProvider` (iCloud/Fastmail/Nextcloud/etc, via the
+  `caldav` package building ICS with `icalendar`) and
+  `GoogleCalendarProvider` (OAuth, via `google-api-python-client`).
+  `calendar_service.py` stays pure domain logic with no knowledge of the
+  plugin contract; the plugin is a thin adapter over it.
+- `todo_plugin.py` — `add_todo`/`list_todos`/`complete_todo`, backed
+  directly by a `todos` table in `storage.py` (no settings, no external
+  service — it's the example of the simplest possible plugin). Voice
+  input has no todo id to give back, so `complete_todo` matches by a
+  case-insensitive text search rather than requiring one.
+- `plugin_hub.py` + `GET /api/plugin-hub` — fetches and caches
+  `index.json` from the separate
+  [`sticky-claude-plugin-hub`](https://github.com/biggy-spoon/sticky-claude-plugin-hub)
+  repo, a community-maintained list of third-party plugins (metadata
+  only: name, description, repo URL). The dashboard shows it alongside
+  which ones are already installed. This never fetches or executes a
+  plugin's actual code — installing one is still the manual copy-into-
+  `plugins/`-and-restart step above; the hub only solves discovery.
 - `dashboard.html` + the `/api/*` routes in `app.py` — a single
   dependency-free HTML/JS page served at `/dashboard`. Settings forms are
   built client-side from each plugin's schema; a plugin-specific data
-  view (like calendar's "Upcoming events") is the one place the
-  dashboard still has to know a plugin by name rather than purely by
-  schema. No authentication — same trust model as the device's own setup
-  portal, meant for the home LAN only.
+  view (calendar's "Upcoming events", todo's open/done lists) is the one
+  place the dashboard still has to know a plugin by name rather than
+  purely by schema. No authentication — same trust model as the device's
+  own setup portal, meant for the home LAN only.
 
 ## Open items
 

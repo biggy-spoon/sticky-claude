@@ -32,6 +32,22 @@ tracked under Unreleased until there's a first stable cut.
   and the dashboard's settings UI are now plugin-generic -- neither has
   calendar-specific logic left. A new plugin needs no backend or
   dashboard changes beyond implementing the contract and registering it.
+- Dashboard visual redesign: a proper design-token system (color,
+  spacing, radius, shadow, motion), icon-box card headers, status/
+  connection pills, a light/dark toggle, and date-chip calendar rows,
+  replacing the original flat dark-only cards.
+- Todo-list plugin (`add_todo`/`list_todos`/`complete_todo`), the second
+  default plugin alongside calendar -- no settings, backed directly by a
+  new `todos` table.
+- Plugins are now auto-discovered: every `.py` file in `backend/plugins/`
+  is scanned at import time for a `Plugin` subclass, instead of being
+  hardcoded into the registry. Installing a community plugin is now
+  "copy its file into `backend/plugins/`, restart" -- no code changes.
+- Plugin hub: a new `GET /api/plugin-hub` endpoint and dashboard card
+  surface a community-maintained index of third-party plugins from the
+  companion [`sticky-claude-plugin-hub`](https://github.com/biggy-spoon/sticky-claude-plugin-hub)
+  repo. The hub is metadata only -- it never fetches or runs a plugin's
+  code automatically.
 
 ### Fixed
 - `epaper_display`'s SSD1677 command sequence, written from generic

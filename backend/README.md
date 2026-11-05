@@ -44,17 +44,27 @@ of it.
 
 ## Plugins
 
-Claude's capabilities beyond plain conversation — right now, calendar
-access — come from plugins (`plugins/`). A plugin declares the Claude
+Claude's capabilities beyond plain conversation — calendar access, a
+todo list — come from plugins (`plugins/`). A plugin declares the Claude
 tools it contributes, the settings fields it needs (rendered generically
 by the dashboard — a plugin with only text/password fields needs zero
 frontend changes), and optionally extra HTTP routes for its own setup
 flow (calendar's Google OAuth callback, for example).
 
-See `plugins/base.py` for the contract and `plugins/calendar_plugin.py`
-for the reference implementation. Adding a new built-in plugin is:
-write a class implementing `plugins.base.Plugin`, then register it in
-`plugins/__init__.py`'s `_register_built_ins()`.
+Every `.py` file in `plugins/` is scanned at import time for a
+`plugins.base.Plugin` subclass and registered automatically — that's the
+whole install story, for a built-in or a third-party plugin alike. **To
+install a community plugin**, copy its file(s) into `plugins/` and
+restart the backend; nothing else to edit. The dashboard's "Plugin hub"
+card lists what's available from
+[sticky-claude-plugin-hub](https://github.com/biggy-spoon/sticky-claude-plugin-hub)
+(a metadata index only — the backend never fetches or runs a plugin's
+code on its own, so review a plugin before dropping it in).
+
+See `plugins/base.py` for the contract, and `plugins/calendar_plugin.py`
+/ `plugins/todo_plugin.py` for the two reference implementations (one
+with external-service settings, one with none). Want to publish your
+own? See that repo's `CONTRIBUTING.md`.
 
 ### Calendar plugin setup
 
@@ -98,7 +108,11 @@ about it.
   state and settings schema (what the dashboard renders its forms from).
 - `POST /api/plugins/{id}/settings` — save a plugin's settings.
 - `GET /api/plugins/{id}/view` — a plugin's dashboard data, if it has one
-  (calendar returns `{"events": [...]}`).
+  (calendar returns `{"events": [...]}`, todo returns
+  `{"open": [...], "done": [...]}`).
+- `GET /api/plugin-hub` — the community plugin index (name, description,
+  repo URL, install state), proxied and cached from
+  `sticky-claude-plugin-hub`.
 - Plugins may add their own routes too — calendar adds
   `GET /api/plugins/calendar/google/login` and `/callback` for its OAuth
   flow.

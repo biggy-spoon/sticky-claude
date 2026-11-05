@@ -23,14 +23,19 @@ calendar and it actually will.
   address. Settings are saved to the device's flash.
 - **A web dashboard** on the backend: conversation history, device
   status, editable core settings (API key, Claude model), and every
-  plugin's own settings and data view (calendar's is upcoming events) —
-  no `.env` editing or restart needed for those.
-- **A plugin system** for giving Claude new capabilities: calendar
-  access (CalDAV or Google Calendar) is the first plugin — connect one
-  and Claude can create and read events by voice, "add a dentist
-  appointment at 3pm on the 24th" actually lands on your calendar — and
-  writing a new plugin (todo lists, smart home, whatever) doesn't
-  require touching the core backend. See `backend/plugins/`.
+  plugin's own settings and data view (calendar's upcoming events, the
+  todo list's open/done items) — no `.env` editing or restart needed for
+  those.
+- **A plugin system** for giving Claude new capabilities, shipping with
+  two: calendar access (CalDAV or Google Calendar — "add a dentist
+  appointment at 3pm on the 24th" actually lands on your calendar) and a
+  todo list ("add buy milk to my todo list"). Every plugin is just a
+  `.py` file in `backend/plugins/` discovered automatically at startup —
+  writing a new one doesn't require touching the core backend, and
+  installing someone else's is a copy-and-restart. See
+  `backend/plugins/` and the companion
+  [`sticky-claude-plugin-hub`](https://github.com/biggy-spoon/sticky-claude-plugin-hub)
+  repo, a community index of plugins beyond these two defaults.
 - **Runs on hardware you already have**: the backend is a small FastAPI
   service meant for a Raspberry Pi or a ZimaOS box you already leave on.
 
@@ -97,8 +102,8 @@ including known gaps and calendar provider setup.
 - `firmware/` — ESP-IDF (C++) firmware: button, mic, WiFi, captive
   portal, LVGL UI, ePaper driver.
 - `backend/` — FastAPI service: transcription, Claude calls, a plugin
-  system (`backend/plugins/`, calendar is the first plugin), and a
-  SQLite-backed dashboard/history/settings.
+  system (`backend/plugins/`; calendar and the todo list ship by
+  default), and a SQLite-backed dashboard/history/settings.
 - `docs/ARCHITECTURE.md` — hardware details and design notes.
 
 ## Status
