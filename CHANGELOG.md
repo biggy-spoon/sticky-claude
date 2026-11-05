@@ -58,6 +58,13 @@ tracked under Unreleased until there's a first stable cut.
   the AI button confirms/toggles the highlighted row. `button_service`
   now polls all three buttons; a new firmware `device_nav` component
   owns the paging state machine and the backend round-trips.
+- Home screen page-position indicator: up to 3 small dots in the
+  bottom-right corner (home shown filled/current, plus the next couple
+  of plugin views), with a ">" arrow if there are more views beyond
+  what the 3 dots show. Only appears once the view list has actually
+  been fetched at least once this boot -- deliberately not fetched
+  proactively just to populate the indicator, to avoid a network round
+  trip every time the idle screen shows on a battery-powered device.
 
 ### Fixed
 - `epaper_display`'s SSD1677 command sequence, written from generic

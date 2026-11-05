@@ -49,7 +49,7 @@ and reboots into normal operation.
 | `assistant_service` | POSTs the WAV to the backend, parses `{transcript, reply}` |
 | `device_nav` | Up/Down paging across plugin device-views (`GET /api/device/views`), confirm/toggle (`POST /api/plugins/{id}/device-action`) |
 | `epaper_display` | SPI transport + SSD1677 command set + 1bpp framebuffer |
-| `ui` | LVGL screens (idle/recording/thinking/reply/loading/plugin-view) rendered via `epaper_display` |
+| `ui` | LVGL screens (idle/recording/thinking/reply/loading/plugin-view) rendered via `epaper_display`; idle also shows a page-position dot indicator |
 | `main` | Wires button hold → record → upload → display, Up/Down → `device_nav`, and first-run routing |
 
 ## Known gaps

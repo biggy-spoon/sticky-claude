@@ -23,7 +23,10 @@ struct DeviceViewRow {
 
 esp_err_t Init();
 
-void ShowIdle(bool wifi_connected);
+// total_pages counts home itself (1 = just home, nothing to page
+// through). 0 means "not known yet" (nothing fetched this boot) and
+// hides the indicator entirely, same as total_pages <= 1.
+void ShowIdle(bool wifi_connected, int total_pages = 0);
 void ShowRecording();
 void ShowThinking();
 void ShowReply(const std::string& transcript, const std::string& reply);

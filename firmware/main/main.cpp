@@ -56,7 +56,7 @@ void OnPressEnd(button_service::ButtonId id, uint32_t held_ms, void*) {
         ESP_LOGI(kTag, "press too short (%lums) or no audio, treating as a tap",
                  static_cast<unsigned long>(held_ms));
         if (!device_nav::OnConfirm()) {
-            ui::ShowIdle(s_wifi_connected);
+            ui::ShowIdle(s_wifi_connected, 1 + device_nav::KnownPluginViewCount());
         }
         return;
     }
@@ -132,7 +132,8 @@ extern "C" void app_main() {
     if (!s_wifi_connected) {
         ESP_LOGE(kTag, "WiFi connect failed; recording will work but uploads will fail");
     }
+    device_nav::SetWifiConnected(s_wifi_connected);
 
-    ui::ShowIdle(s_wifi_connected);
+    ui::ShowIdle(s_wifi_connected, 1 + device_nav::KnownPluginViewCount());
     ESP_LOGI(kTag, "ready: hold the AI button to record, Up/Down to page through plugin views");
 }

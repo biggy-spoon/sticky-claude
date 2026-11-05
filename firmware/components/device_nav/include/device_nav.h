@@ -24,6 +24,22 @@ namespace device_nav {
 
 esp_err_t Init();
 
+// Called once after the initial WiFi connect attempt (main.cpp's startup
+// sequence; this project doesn't watch for connectivity changes after
+// that). Used only so device_nav's own ui::ShowIdle() calls (returning
+// home via Up/Down) report accurate status, rather than guessing.
+void SetWifiConnected(bool connected);
+
+// Plugin views last successfully fetched (not counting home, which isn't
+// fetched -- it's the firmware's own built-in screen), or -1 if nothing
+// has been fetched yet this boot (e.g. before the user has ever pressed
+// Up/Down). Used only to size the home screen's page-position dots;
+// deliberately not fetched proactively just to populate them, since that
+// would mean a network round trip every time the idle screen shows on a
+// battery-powered device that otherwise only talks to the backend when
+// asked to.
+int KnownPluginViewCount();
+
 // Called when a real recording starts (a genuine long-press, not a tap),
 // which takes over the screen for the rest of the converse flow -- so the
 // next Up/Down press after that starts fresh from home rather than

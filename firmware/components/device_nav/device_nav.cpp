@@ -60,6 +60,8 @@ bool s_refresh_in_flight = false;
 int s_view_index = -1;  // -1 = home/conversation screen
 int s_cursor = -1;      // row index within s_views[s_view_index].items, -1 = none/not applicable
 std::vector<View> s_views;
+bool s_has_fetched = false;  // distinguishes "fetched, turned out empty" from "never fetched"
+bool s_wifi_connected = false;
 
 void CopyBounded(char* dest, size_t dest_len, const std::string& src) {
     strncpy(dest, src.c_str(), dest_len - 1);
@@ -196,7 +198,8 @@ void PostDeviceAction(const std::string& plugin_id, const std::string& item_id) 
 // the home screen if s_view_index is -1). Caller must hold s_state_mutex.
 void RenderCurrentLocked() {
     if (s_view_index < 0 || s_view_index >= static_cast<int>(s_views.size())) {
-        ui::ShowIdle(true);
+        const int total_pages = s_has_fetched ? static_cast<int>(s_views.size()) + 1 : 0;
+        ui::ShowIdle(s_wifi_connected, total_pages);
         return;
     }
     const View& view = s_views[s_view_index];
@@ -239,7 +242,15 @@ void HandleRefresh(bool enter_from_end) {
 
     xSemaphoreTake(s_state_mutex, portMAX_DELAY);
     s_refresh_in_flight = false;
-    if (!ok || views.empty()) {
+    if (!ok) {
+        s_view_index = -1;
+        s_cursor = -1;
+        RenderCurrentLocked();
+        xSemaphoreGive(s_state_mutex);
+        return;
+    }
+    s_has_fetched = true;
+    if (views.empty()) {
         s_view_index = -1;
         s_cursor = -1;
         RenderCurrentLocked();
@@ -289,6 +300,19 @@ esp_err_t Init() {
     }
     ESP_LOGI(kTag, "initialized");
     return ESP_OK;
+}
+
+void SetWifiConnected(bool connected) {
+    xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+    s_wifi_connected = connected;
+    xSemaphoreGive(s_state_mutex);
+}
+
+int KnownPluginViewCount() {
+    xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+    const int count = s_has_fetched ? static_cast<int>(s_views.size()) : -1;
+    xSemaphoreGive(s_state_mutex);
+    return count;
 }
 
 void ResetToHome() {

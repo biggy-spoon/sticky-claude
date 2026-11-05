@@ -36,6 +36,19 @@ lv_obj_t* s_error_message_label = nullptr;
 lv_obj_t* s_device_view_title = nullptr;
 lv_obj_t* s_device_view_list = nullptr;
 
+// Page-position indicator on the idle screen: up to 3 dots (home plus the
+// next couple of plugin views) with an arrow if there are more beyond
+// that. Home is always shown first/filled -- see ShowIdle().
+constexpr int kPageDotCount = 3;
+constexpr lv_coord_t kPageDotSize = 10;
+lv_obj_t* s_page_indicator = nullptr;
+lv_obj_t* s_page_dots[kPageDotCount] = {nullptr, nullptr, nullptr};
+lv_obj_t* s_page_arrow = nullptr;
+
+void SetDotFilled(lv_obj_t* dot, bool filled) {
+    lv_obj_set_style_bg_opa(dot, filled ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
+}
+
 void TickTimerCallback(void*) { lv_tick_inc(kTickPeriodMs); }
 
 // LVGL drives drawing through its normal (color) renderer; we threshold
@@ -103,6 +116,33 @@ void BuildIdleScreen() {
     lv_label_set_text(prompt, "Hold the button to talk");
     lv_obj_set_style_text_align(prompt, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_align(prompt, LV_ALIGN_CENTER, 0, 0);
+
+    s_page_indicator = lv_obj_create(s_screen_idle);
+    lv_obj_set_size(s_page_indicator, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_style_border_width(s_page_indicator, 0, 0);
+    lv_obj_set_style_pad_all(s_page_indicator, 0, 0);
+    lv_obj_set_style_bg_opa(s_page_indicator, LV_OPA_TRANSP, 0);
+    lv_obj_set_layout(s_page_indicator, LV_LAYOUT_FLEX);
+    lv_obj_set_flex_flow(s_page_indicator, LV_FLEX_FLOW_ROW);
+    lv_obj_set_style_pad_column(s_page_indicator, 6, 0);
+    lv_obj_set_flex_align(s_page_indicator, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER);
+    lv_obj_clear_flag(s_page_indicator, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_align(s_page_indicator, LV_ALIGN_BOTTOM_RIGHT, -20, -20);
+
+    for (lv_obj_t*& dot : s_page_dots) {
+        dot = lv_obj_create(s_page_indicator);
+        lv_obj_set_size(dot, kPageDotSize, kPageDotSize);
+        lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, 0);
+        lv_obj_set_style_border_width(dot, 1, 0);
+        lv_obj_set_style_border_color(dot, lv_color_black(), 0);
+        lv_obj_set_style_bg_color(dot, lv_color_black(), 0);
+        lv_obj_set_style_pad_all(dot, 0, 0);
+        lv_obj_clear_flag(dot, LV_OBJ_FLAG_SCROLLABLE);
+    }
+
+    s_page_arrow = AddLabel(s_page_indicator, &lv_font_montserrat_14, LV_LABEL_LONG_WRAP, 0);
+    lv_label_set_text(s_page_arrow, ">");
 }
 
 void BuildRecordingScreen() {
@@ -245,8 +285,29 @@ esp_err_t Init() {
     return ESP_OK;
 }
 
-void ShowIdle(bool wifi_connected) {
+void ShowIdle(bool wifi_connected, int total_pages) {
     lv_label_set_text(s_idle_status_label, wifi_connected ? "Connected" : "No WiFi -- uploads will fail");
+
+    if (total_pages <= 1) {
+        lv_obj_add_flag(s_page_indicator, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_clear_flag(s_page_indicator, LV_OBJ_FLAG_HIDDEN);
+        const int dot_count = total_pages < kPageDotCount ? total_pages : kPageDotCount;
+        for (int i = 0; i < kPageDotCount; ++i) {
+            if (i < dot_count) {
+                lv_obj_clear_flag(s_page_dots[i], LV_OBJ_FLAG_HIDDEN);
+                SetDotFilled(s_page_dots[i], i == 0);  // home is always shown first and current
+            } else {
+                lv_obj_add_flag(s_page_dots[i], LV_OBJ_FLAG_HIDDEN);
+            }
+        }
+        if (total_pages > kPageDotCount) {
+            lv_obj_clear_flag(s_page_arrow, LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_obj_add_flag(s_page_arrow, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+
     ShowScreen(s_screen_idle);
 }
 
