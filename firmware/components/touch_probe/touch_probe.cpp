@@ -40,19 +40,100 @@ esp_err_t ClearStatus() {
     return i2c_master_transmit(s_dev, payload, sizeof(payload), 50);
 }
 
-void ResetForAddress0x14() {
-    gpio_config_t out_cfg = {};
-    out_cfg.pin_bit_mask = (1ULL << BOARD_TP_RST_PIN) | (1ULL << BOARD_TP_INT_PIN);
-    out_cfg.mode = GPIO_MODE_OUTPUT;
-    gpio_config(&out_cfg);
+enum class Variant {
+    kDirectionOnly,   // reference driver: gpio_set_direction, RST pad mux left at its default
+    kGpioConfig,      // RST really driven via gpio_config, no INT sync
+    kGpioConfigSync,  // as above, plus the datasheet's 50ms INT-low sync
+    kNoReset,         // power cycle only, RST never driven
+};
 
+const char* VariantName(Variant v) {
+    switch (v) {
+        case Variant::kDirectionOnly: return "A direction-only";
+        case Variant::kGpioConfig: return "B gpio_config";
+        case Variant::kGpioConfigSync: return "C gpio_config+int-sync";
+        case Variant::kNoReset: return "D no-reset";
+    }
+    return "?";
+}
+
+void PowerCycle() {
+    gpio_set_direction(BOARD_TP_RST_PIN, GPIO_MODE_INPUT);
+    gpio_set_direction(BOARD_TP_INT_PIN, GPIO_MODE_INPUT);
+    gpio_set_level(BOARD_TP_PWR_EN_PIN, 0);
+    vTaskDelay(pdMS_TO_TICKS(200));
+    gpio_set_level(BOARD_TP_PWR_EN_PIN, 1);
+    vTaskDelay(pdMS_TO_TICKS(250));
+}
+
+void ApplyVariant(Variant v) {
+    if (v == Variant::kNoReset) {
+        vTaskDelay(pdMS_TO_TICKS(120));
+        return;
+    }
+    if (v == Variant::kDirectionOnly) {
+        gpio_set_direction(BOARD_TP_RST_PIN, GPIO_MODE_OUTPUT);
+        gpio_set_direction(BOARD_TP_INT_PIN, GPIO_MODE_OUTPUT);
+    } else {
+        gpio_config_t out_cfg = {};
+        out_cfg.pin_bit_mask = (1ULL << BOARD_TP_RST_PIN) | (1ULL << BOARD_TP_INT_PIN);
+        out_cfg.mode = GPIO_MODE_OUTPUT;
+        gpio_config(&out_cfg);
+    }
     gpio_set_level(BOARD_TP_RST_PIN, 0);
     gpio_set_level(BOARD_TP_INT_PIN, 1);  // high during the RST edge selects 0x14
     vTaskDelay(pdMS_TO_TICKS(20));
     gpio_set_level(BOARD_TP_RST_PIN, 1);
     vTaskDelay(pdMS_TO_TICKS(20));
+    if (v == Variant::kGpioConfigSync) {
+        gpio_set_level(BOARD_TP_INT_PIN, 0);
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
     gpio_set_direction(BOARD_TP_INT_PIN, GPIO_MODE_INPUT);
     vTaskDelay(pdMS_TO_TICKS(80));
+}
+
+void DetachDevice() {
+    if (s_dev != nullptr) {
+        i2c_master_bus_rm_device(s_dev);
+        s_dev = nullptr;
+    }
+}
+
+bool AttachDevice(uint16_t addr) {
+    i2c_device_config_t dev_cfg = {};
+    dev_cfg.dev_addr_length = I2C_ADDR_BIT_LEN_7;
+    dev_cfg.device_address = addr;
+    dev_cfg.scl_speed_hz = 100000;
+    return i2c_master_bus_add_device(s_bus, &dev_cfg, &s_dev) == ESP_OK;
+}
+
+// Valid means the chip reports a real resolution, which the reference firmware
+// gets on this same board and our earlier bring-up never did.
+bool TryVariant(Variant v) {
+    DetachDevice();
+    PowerCycle();
+    ApplyVariant(v);
+    vTaskDelay(pdMS_TO_TICKS(30));
+
+    const uint16_t addrs[] = {0x14, 0x5D};
+    for (uint16_t addr : addrs) {
+        if (i2c_master_probe(s_bus, addr, 50) != ESP_OK || !AttachDevice(addr)) {
+            continue;
+        }
+        uint8_t id[4] = {};
+        uint8_t res[4] = {};
+        const esp_err_t id_err = ReadReg16(kRegProductId, id, sizeof(id));
+        const esp_err_t res_err = ReadReg16(kRegResolution, res, sizeof(res));
+        const unsigned x = res[0] | (res[1] << 8);
+        const unsigned y = res[2] | (res[3] << 8);
+        const bool valid = id_err == ESP_OK && res_err == ESP_OK && x != 0 && y != 0;
+        ESP_LOGI(kTag, "VARIANT %s: addr=0x%02X id=%02X%02X%02X x=%u y=%u -> %s", VariantName(v),
+                 addr, id[0], id[1], id[2], x, y, valid ? "VALID" : "invalid");
+        return valid;
+    }
+    ESP_LOGI(kTag, "VARIANT %s: no device on 0x14 or 0x5D", VariantName(v));
+    return false;
 }
 
 void DumpIdentity() {
@@ -166,25 +247,31 @@ esp_err_t Init() {
         return ESP_OK;  // a diagnostic must not stop the rest of the device booting
     }
 
-    ResetForAddress0x14();
+    // Direction-only runs first: gpio_config in the later variants switches
+    // the RST pad to GPIO mode, which can't be undone without a reboot here.
+    const Variant variants[] = {Variant::kDirectionOnly, Variant::kNoReset, Variant::kGpioConfig,
+                                Variant::kGpioConfigSync};
+    bool have_winner = false;
+    Variant winner = Variant::kNoReset;
+    for (Variant v : variants) {
+        if (TryVariant(v) && !have_winner) {
+            have_winner = true;
+            winner = v;
+        }
+    }
+    ESP_LOGI(kTag, "VARIANT RESULT: %s", have_winner ? VariantName(winner) : "none valid");
 
-    err = i2c_master_probe(s_bus, BOARD_TP_I2C_ADDR, 200);
-    ESP_LOGI(kTag, "probe 0x%02X: %s", BOARD_TP_I2C_ADDR, esp_err_to_name(err));
-    if (err != ESP_OK) {
+    // Leave the chip in a state worth polling. Variant A can't be replayed after
+    // the RST pad changed mode, so D stands in for it: both skip a real reset
+    // if the mux theory holds.
+    const Variant final_variant = !have_winner || winner == Variant::kDirectionOnly
+                                      ? Variant::kNoReset
+                                      : winner;
+    TryVariant(final_variant);
+    if (s_dev == nullptr) {
+        ESP_LOGW(kTag, "no device attached; not polling");
         return ESP_OK;
     }
-
-    i2c_device_config_t dev_cfg = {};
-    dev_cfg.dev_addr_length = I2C_ADDR_BIT_LEN_7;
-    dev_cfg.device_address = BOARD_TP_I2C_ADDR;
-    dev_cfg.scl_speed_hz = 100000;
-    err = i2c_master_bus_add_device(s_bus, &dev_cfg, &s_dev);
-    if (err != ESP_OK) {
-        ESP_LOGE(kTag, "add_device failed: %s", esp_err_to_name(err));
-        return ESP_OK;
-    }
-
-    vTaskDelay(pdMS_TO_TICKS(30));
     DumpIdentity();
     ClearStatus();
 
