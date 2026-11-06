@@ -65,8 +65,43 @@ tracked under Unreleased until there's a first stable cut.
   been fetched at least once this boot -- deliberately not fetched
   proactively just to populate the indicator, to avoid a network round
   trip every time the idle screen shows on a battery-powered device.
+- Touchscreen support: new `touch_service` drives the GT911 and reports
+  taps in screen coordinates. Tapping a device-view row selects it, and
+  tapping a checkable row completes it.
+- Redesigned device-view screens: larger rows, drawn checkboxes, a position
+  counter, and an optional second line on each row, which calendar events use
+  for their date.
+- Web search: Claude can answer questions from the internet using Anthropic's
+  server-side search tool, up to 3 searches per question. The system prompt no
+  longer steers answers towards the device itself.
+- Swipe gestures: left and right change page, up and down scroll a page at a
+  time. The Up/Down buttons now change page directly instead of moving a row
+  highlight, which is gone.
+- A page indicator on the home, reply, plugin and detail screens: a window of 3
+  dots with arrows when more pages lie beyond it.
+- Calendar details: tapping an event opens its date, time and description. A
+  short press of the AI button now means "back".
+- Todos stay on the device list when completed, with a ticked box and
+  strikethrough, and move to the bottom. Tapping again reopens them. Finished
+  items drop off at midnight (new `todo_timezone` setting) and unfinished ones
+  carry over.
+- Plugin pages draw immediately from a cached copy and refresh in the
+  background, redrawing only if the current page changed.
+
+### Changed
+- **Plugin API:** `Plugin.device_action(item_id)` is now
+  `device_action(item_id, checked)`, and `POST
+  /api/plugins/{id}/device-action` requires `checked`. `DeviceViewItem` gains an
+  optional `detail`. `storage.complete_todo_by_id` is replaced by
+  `set_todo_done`.
 
 ### Fixed
+- Rendering ran on the button polling task, which overflowed its stack and
+  hid button releases for the length of a screen refresh, so every AI press
+  measured about 2.3 seconds. A dedicated UI task now owns the display.
+- Characters missing from the display font, such as `➤`, drew as empty boxes.
+  They're now mapped to what the font can draw.
+- The board's power latch (GPIO45/46) is now set at boot.
 - `epaper_display`'s SSD1677 command sequence, written from generic
   SSD16xx recollection at scaffold time, never produced a visible update
   once real (non-solid-block) content needed rendering. Ported the

@@ -4,9 +4,14 @@ ESP-IDF (C++) firmware for the Seeed Studio reTerminal Sticky (ESP32-S3R8).
 Hold the AI/record button, speak, release — the clip gets POSTed to the
 `backend` service, which transcribes it and asks Claude (with calendar
 tool-use if you've connected one), and the reply renders on the ePaper
-screen. The Up/Down buttons page through each configured plugin's own
-on-device screen (see `device_nav`, below); a short tap of the AI button
-confirms/toggles whatever's highlighted there (e.g. checking off a todo).
+screen.
+
+Swipe left or right, or press Up/Down, to move between home and each configured
+plugin's own on-device screen (see `device_nav`, below). Swipe up or down to
+scroll. Tap a checkable row to toggle it (e.g. a todo), or a row with details to
+open them (e.g. a calendar event). A short press of the AI button goes back:
+from details to the list, from a plugin screen to home, and on home it clears
+any reply.
 
 ## Build
 
@@ -47,10 +52,11 @@ and reboots into normal operation.
 | `captive_portal` | First-run AP + DNS hijack + HTTP setup form |
 | `wifi_service` | STA connect (using `settings_service` values) + SoftAP mode |
 | `assistant_service` | POSTs the WAV to the backend, parses `{transcript, reply}` |
-| `device_nav` | Up/Down paging across plugin device-views (`GET /api/device/views`), confirm/toggle (`POST /api/plugins/{id}/device-action`) |
+| `device_nav` | Page changes, scrolling, taps and "back" across plugin device-views. Draws from a cached `GET /api/device/views` and refreshes in the background; sends toggles with `POST /api/plugins/{id}/device-action` |
+| `touch_service` | GT911 bring-up, polling, tap and swipe detection, and mapping to screen coordinates |
 | `epaper_display` | SPI transport + SSD1677 command set + 1bpp framebuffer |
-| `ui` | LVGL screens (idle/recording/thinking/reply/loading/plugin-view) rendered via `epaper_display`; idle also shows a page-position dot indicator |
-| `main` | Wires button hold → record → upload → display, Up/Down → `device_nav`, and first-run routing |
+| `ui` | LVGL screens rendered via `epaper_display`. Its own task owns LVGL and the panel, so `Show*` calls never block; if several arrive during a refresh, only the newest is drawn |
+| `main` | Wires button hold → record → upload → display, buttons and gestures → `device_nav`, and first-run routing |
 
 ## Known gaps
 
@@ -60,34 +66,27 @@ and reboots into normal operation.
    with a continuously-filled ring buffer armed ahead of the long-press
    threshold; worth porting that pattern if clipped first words become
    annoying in practice.
-2. **Button timing not finely tuned.** `kMinHoldMs` (250ms) is now doing
-   double duty -- it's both "how long counts as an intentional
-   recording" and, below that, "counts as a confirm/toggle tap" -- so
-   both behaviors need adjusting against how the button actually feels
-   in hand. Also: the AI/record button is physically the same pin as the
-   device's power button, which has its own hardware-level long-hold
-   behavior independent of firmware — holding it for several seconds can
-   trigger a hardware power cycle unrelated to recording. Keep test
-   holds in the roughly 0.3-3 second range.
-3. **Up/Down button wiring is unconfirmed on real hardware.**
-   `BOARD_BUTTON_UP_PIN`/`BOARD_BUTTON_DOWN_PIN` (GPIO5/GPIO6) come from
-   Seeed's own hardware-overview docs and an independent review, not
-   from testing an actual device -- confirm the pins respond and that
-   active-low-with-pullup is the right electrical convention (same as
-   the AI button's) before relying on them.
-4. **No touch, SD card, or sensor support wired up** — the board has them,
-   this project doesn't use them (out of scope for the voice-note flow).
-   Touch specifically: its I2C pins and address (SCL=GPIO2, SDA=GPIO3,
-   INT=GPIO21, RST=GPIO41, EN=GPIO42, address 0x6A) are confirmed from
-   the schematic, but the touch controller chip itself isn't named
-   anywhere Seeed publishes -- likely bonded into the display module
-   rather than a documented part on the mainboard -- so using it would
-   need real trial-and-error protocol bring-up, not just wiring up a
-   known driver.
+2. **Button timing not finely tuned.** `kMinHoldMs` (400ms) separates a tap
+   from a recording; adjust against how the button feels in hand. Also: the
+   AI/record button is physically the same pin as the device's power button,
+   which has its own hardware-level long-hold behavior independent of firmware
+   — holding it for several seconds may trigger a hardware power cycle
+   unrelated to recording.
+3. **No SD card or sensor support wired up** — the board has them, this
+   project doesn't use them (out of scope for the voice-note flow).
+4. **Touch bring-up isn't fully explained.** The GT911 only starts properly here
+   with a real RST pulse followed by INT held low for 50ms. Other firmware for
+   this board works without that INT step, and we don't yet know why.
 5. **No partial e-paper refresh.** Every screen change is a full refresh
    (a few seconds). Fine for this project's rate of UI changes; would
    need real work to support faster partial updates if that ever
-   mattered here.
+   mattered here. Because of this, a tap made during a refresh is ignored,
+   since it might land on a row that's about to move.
+6. **Text views aren't drawn.** A plugin returning `view_type="text"` shows
+   "Nothing here yet", because the firmware only draws list items and ignores
+   `body`.
+7. **Very long lists are cut short.** LVGL's 32KB pool holds about 20 rows, so
+   drawing stops when less than 3KB is free, and later rows can't be reached.
 
 ## Licensing note
 

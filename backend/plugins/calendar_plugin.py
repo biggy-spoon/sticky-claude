@@ -14,12 +14,35 @@ import calendar_service
 import settings
 from .base import DeviceView, DeviceViewItem, Plugin, SettingField
 
+log = logging.getLogger("sticky-claude.plugins.calendar")
+
 # Device screens are small and glanceable -- cap how many upcoming events
 # get sent down for the on-device list rather than however many the
 # calendar has in the next 30 days.
 _DEVICE_VIEW_MAX_EVENTS = 15
+_DEVICE_DETAIL_MAX_CHARS = 600
 
-log = logging.getLogger("sticky-claude.plugins.calendar")
+
+def _clock(value: datetime) -> str:
+    return value.strftime("%I:%M %p").lstrip("0")
+
+
+def _row_when(event: calendar_service.CalendarEvent) -> str:
+    # CalDAV all-day events carry plain dates, which have no time of day.
+    if not isinstance(event.start, datetime):
+        return event.start.strftime("%a %b %d") + ", all day"
+    return f"{event.start.strftime('%a %b %d')}, {_clock(event.start)}"
+
+
+def _detail(event: calendar_service.CalendarEvent) -> str:
+    if isinstance(event.start, datetime):
+        lines = [event.start.strftime("%A, %B %d"), f"{_clock(event.start)} - {_clock(event.end)}"]
+    else:
+        lines = [event.start.strftime("%A, %B %d"), "All day"]
+    description = event.description.strip()
+    if description:
+        lines += ["", description[:_DEVICE_DETAIL_MAX_CHARS]]
+    return "\n".join(lines)
 
 _TOOLS = [
     {
@@ -160,7 +183,7 @@ class CalendarPlugin(Plugin):
             log.exception("Failed to load calendar events for device view")
             return None
         items = [
-            DeviceViewItem(id=str(i), text=f"{e.start.strftime('%a %b %d, %I:%M %p')} {e.summary}")
+            DeviceViewItem(id=str(i), text=e.summary, secondary=_row_when(e), detail=_detail(e))
             for i, e in enumerate(events[:_DEVICE_VIEW_MAX_EVENTS])
         ]
         return DeviceView(view_type="list", title="Calendar", items=items)

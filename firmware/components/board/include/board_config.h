@@ -1,21 +1,21 @@
 // reTerminal Sticky (ESP32-S3R8) pin map, scoped to what this project uses:
-// the AI/record + Up/Down buttons, the PDM microphone, and the SSD1677
-// ePaper panel. Touch, SD card, and the fuel-gauge/IMU sensors are on this
-// board too but are not wired up here since this project doesn't use them.
+// the AI/record + Up/Down buttons, the PDM microphone, the SSD1677 ePaper
+// panel, and the GT911 touch panel. SD card and the fuel-gauge/IMU sensors are
+// on this board too but are not wired up here since this project doesn't use
+// them.
 #pragma once
 
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
 
-#define BOARD_BUTTON_AI_PIN      GPIO_NUM_4   // long-press = record, short tap = confirm/toggle
-// Confirmed from Seeed's own hardware-overview docs
-// (seeedstudio.com/sticky/docs/en/device-guide/hardware-overview, "Physical
-// buttons" row) and independently corroborated by a CNX Software review of
-// the product -- both list Up/Down as real buttons distinct from the AI
-// button. Not wired up by this project until the on-device plugin-view
-// navigation feature; electrical convention (active-low, pull-up) assumed
-// to match the AI button's and needs confirming on real hardware.
-#define BOARD_BUTTON_UP_PIN      GPIO_NUM_5   // previous device view / row
+// Board power latch (schematic PWR_HOLD/PWR_LOCK). Pin numbers and the
+// drive-both-high behavior come from the handwriting pad firmware's
+// board_power.cpp, not from Seeed's docs.
+#define BOARD_POWER_HOLD_PIN     GPIO_NUM_45
+#define BOARD_POWER_LOCK_PIN     GPIO_NUM_46
+
+#define BOARD_BUTTON_AI_PIN      GPIO_NUM_4  // long-press = record, short tap = confirm/toggle
+#define BOARD_BUTTON_UP_PIN     GPIO_NUM_5   // previous device view / row
 #define BOARD_BUTTON_DOWN_PIN    GPIO_NUM_6   // next device view / row
 
 #define BOARD_PDM_CLK_PIN        GPIO_NUM_19
@@ -36,3 +36,13 @@
 #define BOARD_EPD_WIDTH          800
 #define BOARD_EPD_HEIGHT         480
 #define BOARD_EPD_BUFFER_LEN     ((BOARD_EPD_WIDTH * BOARD_EPD_HEIGHT) / 8)
+
+// GT911 touch panel. 0x14 is selected by holding INT high across the reset
+// edge. The schematic's I2C tree labels the touch panel 0x6A, but nothing
+// answers there; a bus scan finds the chip at 0x14.
+#define BOARD_TP_I2C_SCL_PIN    GPIO_NUM_2
+#define BOARD_TP_I2C_SDA_PIN     GPIO_NUM_3
+#define BOARD_TP_INT_PIN         GPIO_NUM_21
+#define BOARD_TP_RST_PIN         GPIO_NUM_41
+#define BOARD_TP_PWR_EN_PIN      GPIO_NUM_42
+#define BOARD_TP_I2C_ADDR        0x14

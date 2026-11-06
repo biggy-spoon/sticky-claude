@@ -18,11 +18,15 @@ calendar and it actually will.
 
 - **Push-to-talk voice notes**, answered by Claude, shown on the
   device's e-paper display with real typography (not a status bar).
-- **On-device plugin views**: the Up/Down buttons page through each
-  configured plugin's own screen (upcoming calendar events, your todo
-  list) without touching the backend dashboard; a short tap of the AI
-  button confirms/toggles whatever's highlighted (checking off a todo,
-  for instance).
+- **Answers from the web**: Claude can search the internet, so you can ask
+  about anything, not just your calendar and todos. Each search costs about
+  1 cent on your Anthropic API key.
+- **On-device plugin views**: swipe left or right, or use the Up/Down buttons,
+  to move between each configured plugin's own screen (upcoming calendar
+  events, your todo list) without opening the backend dashboard. Swipe up or
+  down to scroll, tap a calendar event for its details, and tap a todo to check
+  it off. Dots show which page you're on. Finished todos drop off the list at
+  midnight, and unfinished ones carry over.
 - **No-recompile setup**: first boot opens a WiFi access point with a
   browser-based setup page for WiFi credentials and your backend's
   address. Settings are saved to the device's flash.

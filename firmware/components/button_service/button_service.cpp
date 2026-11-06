@@ -13,7 +13,7 @@ constexpr const char* kTag = "button_service";
 constexpr int kActiveLevel = 0;  // buttons pull their pin low when pressed
 constexpr uint32_t kPollIntervalMs = 15;
 constexpr uint8_t kDebounceSamples = 3;  // consecutive matching reads to accept a transition
-constexpr uint32_t kPollTaskStackWords = 2560;
+constexpr uint32_t kPollTaskStackBytes = 4096;
 
 struct ButtonState {
     ButtonId id;
@@ -95,7 +95,7 @@ esp_err_t Init() {
 
     if (s_task == nullptr) {
         const BaseType_t created =
-            xTaskCreate(PollTask, "button_poll", kPollTaskStackWords, nullptr, 5, &s_task);
+            xTaskCreate(PollTask, "button_poll", kPollTaskStackBytes, nullptr, 5, &s_task);
         if (created != pdPASS) {
             s_task = nullptr;
             return ESP_ERR_NO_MEM;

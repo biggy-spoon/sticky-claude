@@ -156,19 +156,24 @@ def complete_todo(text_match: str) -> Optional[str]:
         return row["text"]
 
 
-def complete_todo_by_id(todo_id: int) -> bool:
-    """Same as complete_todo(), but by id rather than a text search --
-    the device's Up/Down+tap interaction highlights a specific row and
-    knows its id directly, unlike voice input. Returns False if there's
-    no open todo with that id (already done, or never existed)."""
+def set_todo_done(todo_id: int, done: bool) -> bool:
+    """Sets a todo's done state by id, for the device's tap interaction, which
+    knows the exact row unlike voice input. False if no such todo exists."""
+    done_at = datetime.now(timezone.utc).isoformat() if done else None
     with _connect() as conn:
-        row = conn.execute(
-            "SELECT id FROM todos WHERE id = ? AND done = 0", (todo_id,),
-        ).fetchone()
-        if row is None:
-            return False
-        conn.execute(
-            "UPDATE todos SET done = 1, done_at = ? WHERE id = ?",
-            (datetime.now(timezone.utc).isoformat(), todo_id),
+        cursor = conn.execute(
+            "UPDATE todos SET done = ?, done_at = ? WHERE id = ?",
+            (int(done), done_at, todo_id),
         )
-        return True
+        return cursor.rowcount > 0
+
+
+def list_todos_done_since(since_utc: datetime) -> list[dict]:
+    """Todos completed at or after this moment, earliest first."""
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT id, created_at, text, done, done_at FROM todos "
+            "WHERE done = 1 AND done_at >= ? ORDER BY done_at ASC",
+            (since_utc.astimezone(timezone.utc).isoformat(),),
+        ).fetchall()
+        return [dict(row) for row in rows]
