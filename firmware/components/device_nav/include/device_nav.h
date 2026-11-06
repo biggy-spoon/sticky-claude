@@ -11,15 +11,11 @@
 // wrapping past the last plugin view back to home. Up mirrors this
 // backward, landing on the *previous* view's *last* row so paging up
 // through content feels continuous rather than jumping to a fixed spot.
-// Confirm (a short tap of the AI button, handled by main.cpp since that's
-// also the record button) toggles the highlighted row if the current view
-// has one.
+// Tapping a row on the touchscreen highlights it and toggles it if it's
+// checkable. A short press of the AI button toggles the highlighted row too.
 //
-// Network calls (fetching views, posting a toggle) never run on the
-// caller's thread -- OnUp/OnDown/OnConfirm must stay fast since they're
-// called directly from button_service's poll task, same constraint that's
-// why main.cpp hands recording off to a separate AssistantTask rather than
-// posting /converse inline.
+// Network calls (fetching views, posting a toggle) run on this component's own
+// task, so every function here is quick enough for the button and touch tasks.
 namespace device_nav {
 
 esp_err_t Init();
@@ -42,9 +38,7 @@ int KnownPluginViewCount();
 
 // Called when a real recording starts (a genuine long-press, not a tap),
 // which takes over the screen for the rest of the converse flow -- so the
-// next Up/Down press after that starts fresh from home rather than
-// resuming wherever paging had left off before the button did double
-// duty as record.
+// next Up/Down press after that starts fresh from home.
 void ResetToHome();
 
 void OnUp();
@@ -55,5 +49,9 @@ void OnDown();
 // screen is showing, or the current view has no checkable row highlighted
 // -- so the caller should fall back to its own idle-screen behavior.
 bool OnConfirm();
+
+// A tap at screen coordinates. Ignored outside a row, and while the screen is
+// refreshing, since what's on the glass may not match the list yet.
+void OnTap(int x, int y);
 
 }  // namespace device_nav

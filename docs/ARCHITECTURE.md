@@ -6,15 +6,16 @@
 - Display: 3.97" monochrome ePaper, 800x480, SSD1677 controller, SPI
 - Audio: single PDM microphone (no speaker — this device is **text-out only**)
 - Three physical buttons: AI (GPIO4, long-press = push-to-talk, short
-  tap = confirm/toggle on a device-view screen), Up (GPIO5), and Down
+  press = confirm/toggle on a device-view screen), Up (GPIO5), and Down
   (GPIO6) -- Up/Down page through plugin device-views. The AI button's
   pin is physically shared with the device's power button, which has
-  its own hardware-level long-hold behavior independent of firmware —
-  keep holds in the roughly 0.3-3 second range; much longer holds can
-  trigger a hardware power cycle unrelated to recording. Up/Down were
-  confirmed from Seeed's hardware-overview docs and an independent
-  review rather than from testing a real device -- see
-  `firmware/README.md` → "Known gaps".
+  its own hardware-level long-hold behavior independent of firmware.
+- Touch: GT911 at I2C address 0x14 (SCL GPIO2, SDA GPIO3, INT GPIO21,
+  RST GPIO41, EN GPIO42). The sensor is portrait 480x800, so
+  `touch_service` maps it with `screen_x = 799 - raw_y` and
+  `screen_y = 479 - raw_x`. Measured on hardware.
+- Power latch: GPIO45 and GPIO46 are driven high at boot (schematic
+  `PWR_HOLD`/`PWR_LOCK`).
 
 Pin map lives in `firmware/components/board/include/board_config.h`,
 confirmed against the
@@ -157,13 +158,12 @@ repository is MIT.
   the firmware only ever renders one of a few known view types, so a
   plugin (including a third-party one from the plugin hub) can describe
   a screen but never execute code on the device. `device_action()`
-  handles confirming/toggling a highlighted row (a short tap of the
+  handles confirming/toggling a row (tapping it, or a short press of the
   AI button), by the row's id rather than text search since the device
   has a real id to work with, unlike voice.
 
 ## Open items
 
 See `firmware/README.md` → "Known gaps" for the concrete list (no
-pre-roll audio buffering, button hold-timing not finely tuned, no touch/
-SD/sensor support wired up — the board has them, this project doesn't
+pre-roll audio buffering, button hold-timing not finely tuned, no SD/sensor support wired up — the board has them, this project doesn't
 use them).

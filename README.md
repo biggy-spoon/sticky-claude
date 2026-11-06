@@ -20,9 +20,8 @@ calendar and it actually will.
   device's e-paper display with real typography (not a status bar).
 - **On-device plugin views**: the Up/Down buttons page through each
   configured plugin's own screen (upcoming calendar events, your todo
-  list) without touching the backend dashboard; a short tap of the AI
-  button confirms/toggles whatever's highlighted (checking off a todo,
-  for instance).
+  list) without opening the backend dashboard. Tap a row on the touchscreen
+  to select it, or tap a todo to check it off.
 - **No-recompile setup**: first boot opens a WiFi access point with a
   browser-based setup page for WiFi credentials and your backend's
   address. Settings are saved to the device's flash.

@@ -7,35 +7,39 @@
 #include "device_nav.h"
 #include "epaper_display.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "nvs_flash.h"
 #include "recording_service.h"
 #include "settings_service.h"
-#include "touch_probe.h"
+#include "touch_service.h"
 #include "ui.h"
 #include "wifi_service.h"
 
 namespace {
 
 constexpr const char* kTag = "main";
-constexpr uint32_t kMinHoldMs = 250;  // ignore accidental taps shorter than this
+constexpr uint32_t kMinHoldMs = 400;  // a shorter AI press is a tap, not a recording
 constexpr uint32_t kAssistantTaskStackWords = 6144;
 
 TaskHandle_t s_assistant_task = nullptr;
+esp_timer_handle_t s_recording_screen_timer = nullptr;
 bool s_wifi_connected = false;
+
+void ShowRecordingScreen(void*) { ui::ShowRecording(); }
 
 void OnPressStart(button_service::ButtonId id, void*) {
     if (id != button_service::ButtonId::kAi) {
         return;  // Up/Down only act on release -- see OnPressEnd
     }
-    // Started optimistically; a press short enough to turn out to be a tap
-    // (handled below) just discards this via StopCapture(), same as
-    // before Up/Down existed.
-    ESP_LOGI(kTag, "recording...");
+    // Capture starts now so the first words aren't lost, but the screen waits:
+    // a tap shouldn't trigger a full e-paper refresh.
     recording_service::StartCapture();
-    ui::ShowRecording();
+    esp_timer_start_once(s_recording_screen_timer, kMinHoldMs * 1000ULL);
 }
+
+void OnTap(int x, int y, void*) { device_nav::OnTap(x, y); }
 
 void OnPressEnd(button_service::ButtonId id, uint32_t held_ms, void*) {
     if (id == button_service::ButtonId::kUp) {
@@ -47,17 +51,14 @@ void OnPressEnd(button_service::ButtonId id, uint32_t held_ms, void*) {
         return;
     }
 
+    esp_timer_stop(s_recording_screen_timer);
     size_t sample_count = 0;
     recording_service::StopCapture(&sample_count);
 
     if (held_ms < kMinHoldMs || sample_count == 0) {
-        // Too short to be an intentional recording -- treat it as a tap:
-        // confirm/toggle whatever's highlighted if a device view is
-        // showing, otherwise just go back to idle like before this
-        // button did double duty.
-        ESP_LOGI(kTag, "press too short (%lums) or no audio, treating as a tap",
-                 static_cast<unsigned long>(held_ms));
+        // A tap toggles the highlighted row; with nothing to toggle it goes home.
         if (!device_nav::OnConfirm()) {
+            device_nav::ResetToHome();
             ui::ShowIdle(s_wifi_connected, 1 + device_nav::KnownPluginViewCount());
         }
         return;
@@ -129,12 +130,22 @@ extern "C" void app_main() {
     ESP_ERROR_CHECK(recording_service::Init());
     ESP_ERROR_CHECK(button_service::Init());
     ESP_ERROR_CHECK(device_nav::Init());
-    ESP_ERROR_CHECK(touch_probe::Init());
+
+    esp_timer_create_args_t timer_args = {};
+    timer_args.callback = &ShowRecordingScreen;
+    timer_args.name = "rec_screen";
+    ESP_ERROR_CHECK(esp_timer_create(&timer_args, &s_recording_screen_timer));
 
     xTaskCreate(AssistantTask, "assistant", kAssistantTaskStackWords, nullptr, 5,
                 &s_assistant_task);
 
     button_service::SetHandlers(&OnPressStart, &OnPressEnd, nullptr);
+
+    touch_service::SetTapHandler(&OnTap, nullptr);
+    err = touch_service::Init();
+    if (err != ESP_OK) {
+        ESP_LOGE(kTag, "touch unavailable: %s", esp_err_to_name(err));
+    }
 
     const settings_service::Settings settings = settings_service::Get();
     ESP_LOGI(kTag, "connecting to WiFi...");

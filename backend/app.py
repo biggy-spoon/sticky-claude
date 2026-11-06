@@ -289,7 +289,8 @@ def api_device_views() -> dict:
             "view_type": view.view_type,
             "title": view.title,
             "body": view.body,
-            "items": [{"id": item.id, "text": item.text, "checked": item.checked}
+            "items": [{"id": item.id, "text": item.text, "secondary": item.secondary,
+                       "checked": item.checked}
                       for item in (view.items or [])],
         })
     return {"views": views}

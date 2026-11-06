@@ -160,7 +160,8 @@ class CalendarPlugin(Plugin):
             log.exception("Failed to load calendar events for device view")
             return None
         items = [
-            DeviceViewItem(id=str(i), text=f"{e.start.strftime('%a %b %d, %I:%M %p')} {e.summary}")
+            DeviceViewItem(id=str(i), text=e.summary,
+                           secondary=e.start.strftime("%a %b %d, %I:%M %p"))
             for i, e in enumerate(events[:_DEVICE_VIEW_MAX_EVENTS])
         ]
         return DeviceView(view_type="list", title="Calendar", items=items)

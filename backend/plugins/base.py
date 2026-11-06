@@ -53,6 +53,7 @@ class DeviceViewItem:
     id: str
     text: str
     checked: Optional[bool] = None
+    secondary: str = ""  # optional smaller second line, e.g. an event's date
 
 
 @dataclass

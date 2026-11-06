@@ -26,6 +26,7 @@ constexpr size_t kQueueLength = 8;
 struct Item {
     std::string id;
     std::string text;
+    std::string secondary;
     bool checkable = false;
     bool checked = false;
 };
@@ -38,7 +39,7 @@ struct View {
     std::vector<Item> items;
 };
 
-enum class CommandType { kRefresh, kPostAction, kRender };
+enum class CommandType { kRefresh, kPostAction };
 
 struct Command {
     CommandType type;
@@ -52,11 +53,7 @@ SemaphoreHandle_t s_state_mutex = nullptr;
 TaskHandle_t s_task = nullptr;
 bool s_refresh_in_flight = false;
 
-// Protected by s_state_mutex -- read fast-path (OnUp/OnDown/OnConfirm) runs
-// on button_service's poll task; writes also happen from DeviceNavTask
-// during a refresh. Only the state itself is locked, not the UI calls that
-// follow -- see device_nav.h's header comment and button_service's
-// existing (unguarded) cross-task ui:: calls for the precedent.
+// Protected by s_state_mutex. Buttons, touch and DeviceNavTask all change it.
 int s_view_index = -1;  // -1 = home/conversation screen
 int s_cursor = -1;      // row index within s_views[s_view_index].items, -1 = none/not applicable
 std::vector<View> s_views;
@@ -150,6 +147,8 @@ bool FetchViews(std::vector<View>* out_views) {
             item.id = cJSON_IsString(field) ? field->valuestring : "";
             field = cJSON_GetObjectItemCaseSensitive(item_json, "text");
             item.text = cJSON_IsString(field) ? field->valuestring : "";
+            field = cJSON_GetObjectItemCaseSensitive(item_json, "secondary");
+            item.secondary = cJSON_IsString(field) ? field->valuestring : "";
             field = cJSON_GetObjectItemCaseSensitive(item_json, "checked");
             item.checkable = cJSON_IsBool(field);
             item.checked = item.checkable && cJSON_IsTrue(field);
@@ -196,15 +195,6 @@ void PostDeviceAction(const std::string& plugin_id, const std::string& item_id) 
 
 // Builds the ui:: row list for the current view and shows it (or shows
 // the home screen if s_view_index is -1). Caller must hold s_state_mutex.
-//
-// This is never called directly from OnUp/OnDown/OnConfirm, even though
-// they already hold the mutex when they'd want to -- ui::ShowDeviceView()
-// builds LVGL objects, runs flex layout, and triggers a full epaper SPI
-// flush, which is a much deeper call stack than the fixed-screen updates
-// (ShowIdle/ShowRecording) button_service's callbacks have always done
-// inline. Running that on button_service's poll task actually overflowed
-// its stack during testing on real hardware. Every render goes through
-// EnqueueRender() -> DeviceNavTask instead, same as the network calls.
 void RenderCurrentLocked() {
     if (s_view_index < 0 || s_view_index >= static_cast<int>(s_views.size())) {
         const int total_pages = s_has_fetched ? static_cast<int>(s_views.size()) + 1 : 0;
@@ -217,6 +207,7 @@ void RenderCurrentLocked() {
         const Item& item = view.items[i];
         ui::DeviceViewRow row;
         row.text = item.text;
+        row.secondary = item.secondary;
         row.checkable = item.checkable;
         row.checked = item.checked;
         row.highlighted = (static_cast<int>(i) == s_cursor);
@@ -242,18 +233,6 @@ void EnqueuePostAction(const std::string& plugin_id, const std::string& item_id)
     CopyBounded(command.plugin_id, sizeof(command.plugin_id), plugin_id);
     CopyBounded(command.item_id, sizeof(command.item_id), item_id);
     xQueueSend(s_queue, &command, 0);
-}
-
-void EnqueueRender() {
-    Command command = {};
-    command.type = CommandType::kRender;
-    xQueueSend(s_queue, &command, 0);
-}
-
-void HandleRender() {
-    xSemaphoreTake(s_state_mutex, portMAX_DELAY);
-    RenderCurrentLocked();
-    xSemaphoreGive(s_state_mutex);
 }
 
 void HandleRefresh(bool enter_from_end) {
@@ -288,6 +267,28 @@ void HandleRefresh(bool enter_from_end) {
     xSemaphoreGive(s_state_mutex);
 }
 
+// Applies a toggle to the highlighted row. Toggling means "done" for every
+// checkable view so far (todo), so the item leaves the list, matching
+// device_view() only returning open items. Caller must hold s_state_mutex.
+bool ConfirmCursorLocked(std::string* plugin_id, std::string* item_id) {
+    if (s_view_index < 0 || s_cursor < 0) {
+        return false;
+    }
+    View& view = s_views[s_view_index];
+    if (s_cursor >= static_cast<int>(view.items.size()) || !view.items[s_cursor].checkable) {
+        return false;
+    }
+    *plugin_id = view.plugin_id;
+    *item_id = view.items[s_cursor].id;
+    view.items.erase(view.items.begin() + s_cursor);
+    if (view.items.empty()) {
+        s_cursor = -1;
+    } else if (s_cursor >= static_cast<int>(view.items.size())) {
+        s_cursor = static_cast<int>(view.items.size()) - 1;
+    }
+    return true;
+}
+
 void DeviceNavTask(void*) {
     Command command;
     while (true) {
@@ -300,9 +301,6 @@ void DeviceNavTask(void*) {
                 break;
             case CommandType::kPostAction:
                 PostDeviceAction(command.plugin_id, command.item_id);
-                break;
-            case CommandType::kRender:
-                HandleRender();
                 break;
         }
     }
@@ -360,8 +358,8 @@ void OnDown() {
     const View& view = s_views[s_view_index];
     if (s_cursor >= 0 && s_cursor + 1 < static_cast<int>(view.items.size())) {
         ++s_cursor;
+        RenderCurrentLocked();
         xSemaphoreGive(s_state_mutex);
-        EnqueueRender();
         return;
     }
 
@@ -374,8 +372,8 @@ void OnDown() {
     } else {
         s_cursor = s_views[s_view_index].items.empty() ? -1 : 0;
     }
+    RenderCurrentLocked();
     xSemaphoreGive(s_state_mutex);
-    EnqueueRender();
 }
 
 void OnUp() {
@@ -388,8 +386,8 @@ void OnUp() {
 
     if (s_cursor > 0) {
         --s_cursor;
+        RenderCurrentLocked();
         xSemaphoreGive(s_state_mutex);
-        EnqueueRender();
         return;
     }
 
@@ -403,39 +401,44 @@ void OnUp() {
                        ? -1
                        : static_cast<int>(s_views[s_view_index].items.size()) - 1;
     }
+    RenderCurrentLocked();
     xSemaphoreGive(s_state_mutex);
-    EnqueueRender();
 }
 
 bool OnConfirm() {
     xSemaphoreTake(s_state_mutex, portMAX_DELAY);
-    if (s_view_index < 0 || s_cursor < 0) {
-        xSemaphoreGive(s_state_mutex);
-        return false;
-    }
-    View& view = s_views[s_view_index];
-    if (s_cursor >= static_cast<int>(view.items.size()) || !view.items[s_cursor].checkable) {
-        xSemaphoreGive(s_state_mutex);
-        return false;
-    }
-
-    const std::string plugin_id = view.plugin_id;
-    const std::string item_id = view.items[s_cursor].id;
-    // Toggling means "done" for every checkable view this contract has
-    // today (todo), so the item disappears from the list rather than just
-    // flipping its mark -- matches device_view() only ever returning open
-    // items in the first place.
-    view.items.erase(view.items.begin() + s_cursor);
-    if (view.items.empty()) {
-        s_cursor = -1;
-    } else if (s_cursor >= static_cast<int>(view.items.size())) {
-        s_cursor = static_cast<int>(view.items.size()) - 1;
+    std::string plugin_id;
+    std::string item_id;
+    const bool confirmed = ConfirmCursorLocked(&plugin_id, &item_id);
+    if (confirmed) {
+        RenderCurrentLocked();
     }
     xSemaphoreGive(s_state_mutex);
 
-    EnqueueRender();
-    EnqueuePostAction(plugin_id, item_id);
-    return true;
+    if (confirmed) {
+        EnqueuePostAction(plugin_id, item_id);
+    }
+    return confirmed;
+}
+
+void OnTap(int x, int y) {
+    xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+    const int row = s_view_index < 0 ? -1 : ui::HitTestDeviceViewRow(x, y);
+    if (row < 0 || row >= static_cast<int>(s_views[s_view_index].items.size())) {
+        xSemaphoreGive(s_state_mutex);
+        return;
+    }
+
+    s_cursor = row;
+    std::string plugin_id;
+    std::string item_id;
+    const bool confirmed = ConfirmCursorLocked(&plugin_id, &item_id);
+    RenderCurrentLocked();
+    xSemaphoreGive(s_state_mutex);
+
+    if (confirmed) {
+        EnqueuePostAction(plugin_id, item_id);
+    }
 }
 
 }  // namespace device_nav
