@@ -11,6 +11,7 @@
 #include "nvs_flash.h"
 #include "recording_service.h"
 #include "settings_service.h"
+#include "touch_probe.h"
 #include "ui.h"
 #include "wifi_service.h"
 
@@ -119,6 +120,7 @@ extern "C" void app_main() {
     ESP_ERROR_CHECK(recording_service::Init());
     ESP_ERROR_CHECK(button_service::Init());
     ESP_ERROR_CHECK(device_nav::Init());
+    ESP_ERROR_CHECK(touch_probe::Init());
 
     xTaskCreate(AssistantTask, "assistant", kAssistantTaskStackWords, nullptr, 5,
                 &s_assistant_task);

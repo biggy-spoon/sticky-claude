@@ -13,7 +13,15 @@ constexpr const char* kTag = "button_service";
 constexpr int kActiveLevel = 0;  // buttons pull their pin low when pressed
 constexpr uint32_t kPollIntervalMs = 15;
 constexpr uint8_t kDebounceSamples = 3;  // consecutive matching reads to accept a transition
-constexpr uint32_t kPollTaskStackWords = 2560;
+// 2560 was the original single-button budget. It turned out to already be
+// marginal even for this task's lightest calls (ESP_LOG formatting, a
+// fixed-screen ui:: update): a real-hardware test still overflowed it on
+// ShowRecording() alone, a path that had already run cleanly several times
+// in the same boot, suggesting a tight-but-not-always-safe margin rather
+// than one specific call being the sole culprit. Doubled as a safety
+// margin on top of (not instead of) moving the genuinely heavy
+// device-view rendering off this task entirely -- see device_nav.h.
+constexpr uint32_t kPollTaskStackWords = 5120;
 
 struct ButtonState {
     ButtonId id;

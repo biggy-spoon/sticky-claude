@@ -1,7 +1,8 @@
 // reTerminal Sticky (ESP32-S3R8) pin map, scoped to what this project uses:
-// the AI/record + Up/Down buttons, the PDM microphone, and the SSD1677
-// ePaper panel. Touch, SD card, and the fuel-gauge/IMU sensors are on this
-// board too but are not wired up here since this project doesn't use them.
+// the AI/record + Up/Down buttons, the PDM microphone, the SSD1677 ePaper
+// panel, and (as of touch_probe) the capacitive touch panel's I2C bus.
+// SD card and the fuel-gauge/IMU sensors are on this board too but are not
+// wired up here since this project doesn't use them.
 #pragma once
 
 #include "driver/gpio.h"
@@ -36,3 +37,18 @@
 #define BOARD_EPD_WIDTH          800
 #define BOARD_EPD_HEIGHT         480
 #define BOARD_EPD_BUFFER_LEN     ((BOARD_EPD_WIDTH * BOARD_EPD_HEIGHT) / 8)
+
+// Touch panel I2C. Pins are confirmed from Seeed's hardware-overview docs
+// (SCL/SDA/INT/RST/EN); the controller chip is not named anywhere Seeed
+// publishes. The schematic's I2C-tree label claimed address 0x6A, but a
+// real-hardware bus scan found nothing there and instead found a device
+// at 0x14 -- one of the GT911's two selectable addresses (chosen by the
+// INT pin's level during reset; ours floats high via its pull-up, which
+// is the documented condition for 0x14). Treating it as a GT911 until
+// proven otherwise; see touch_probe for the protocol-level verification.
+#define BOARD_TP_I2C_SCL_PIN     GPIO_NUM_2
+#define BOARD_TP_I2C_SDA_PIN     GPIO_NUM_3
+#define BOARD_TP_INT_PIN         GPIO_NUM_21
+#define BOARD_TP_RST_PIN         GPIO_NUM_41
+#define BOARD_TP_PWR_EN_PIN      GPIO_NUM_42
+#define BOARD_TP_I2C_ADDR        0x14

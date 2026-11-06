@@ -38,7 +38,7 @@ struct View {
     std::vector<Item> items;
 };
 
-enum class CommandType { kRefresh, kPostAction };
+enum class CommandType { kRefresh, kPostAction, kRender };
 
 struct Command {
     CommandType type;
@@ -196,6 +196,15 @@ void PostDeviceAction(const std::string& plugin_id, const std::string& item_id) 
 
 // Builds the ui:: row list for the current view and shows it (or shows
 // the home screen if s_view_index is -1). Caller must hold s_state_mutex.
+//
+// This is never called directly from OnUp/OnDown/OnConfirm, even though
+// they already hold the mutex when they'd want to -- ui::ShowDeviceView()
+// builds LVGL objects, runs flex layout, and triggers a full epaper SPI
+// flush, which is a much deeper call stack than the fixed-screen updates
+// (ShowIdle/ShowRecording) button_service's callbacks have always done
+// inline. Running that on button_service's poll task actually overflowed
+// its stack during testing on real hardware. Every render goes through
+// EnqueueRender() -> DeviceNavTask instead, same as the network calls.
 void RenderCurrentLocked() {
     if (s_view_index < 0 || s_view_index >= static_cast<int>(s_views.size())) {
         const int total_pages = s_has_fetched ? static_cast<int>(s_views.size()) + 1 : 0;
@@ -233,6 +242,18 @@ void EnqueuePostAction(const std::string& plugin_id, const std::string& item_id)
     CopyBounded(command.plugin_id, sizeof(command.plugin_id), plugin_id);
     CopyBounded(command.item_id, sizeof(command.item_id), item_id);
     xQueueSend(s_queue, &command, 0);
+}
+
+void EnqueueRender() {
+    Command command = {};
+    command.type = CommandType::kRender;
+    xQueueSend(s_queue, &command, 0);
+}
+
+void HandleRender() {
+    xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+    RenderCurrentLocked();
+    xSemaphoreGive(s_state_mutex);
 }
 
 void HandleRefresh(bool enter_from_end) {
@@ -273,10 +294,16 @@ void DeviceNavTask(void*) {
         if (xQueueReceive(s_queue, &command, portMAX_DELAY) != pdTRUE) {
             continue;
         }
-        if (command.type == CommandType::kRefresh) {
-            HandleRefresh(command.enter_from_end);
-        } else {
-            PostDeviceAction(command.plugin_id, command.item_id);
+        switch (command.type) {
+            case CommandType::kRefresh:
+                HandleRefresh(command.enter_from_end);
+                break;
+            case CommandType::kPostAction:
+                PostDeviceAction(command.plugin_id, command.item_id);
+                break;
+            case CommandType::kRender:
+                HandleRender();
+                break;
         }
     }
 }
@@ -333,8 +360,8 @@ void OnDown() {
     const View& view = s_views[s_view_index];
     if (s_cursor >= 0 && s_cursor + 1 < static_cast<int>(view.items.size())) {
         ++s_cursor;
-        RenderCurrentLocked();
         xSemaphoreGive(s_state_mutex);
+        EnqueueRender();
         return;
     }
 
@@ -347,8 +374,8 @@ void OnDown() {
     } else {
         s_cursor = s_views[s_view_index].items.empty() ? -1 : 0;
     }
-    RenderCurrentLocked();
     xSemaphoreGive(s_state_mutex);
+    EnqueueRender();
 }
 
 void OnUp() {
@@ -361,8 +388,8 @@ void OnUp() {
 
     if (s_cursor > 0) {
         --s_cursor;
-        RenderCurrentLocked();
         xSemaphoreGive(s_state_mutex);
+        EnqueueRender();
         return;
     }
 
@@ -376,8 +403,8 @@ void OnUp() {
                        ? -1
                        : static_cast<int>(s_views[s_view_index].items.size()) - 1;
     }
-    RenderCurrentLocked();
     xSemaphoreGive(s_state_mutex);
+    EnqueueRender();
 }
 
 bool OnConfirm() {
@@ -404,9 +431,9 @@ bool OnConfirm() {
     } else if (s_cursor >= static_cast<int>(view.items.size())) {
         s_cursor = static_cast<int>(view.items.size()) - 1;
     }
-    RenderCurrentLocked();
     xSemaphoreGive(s_state_mutex);
 
+    EnqueueRender();
     EnqueuePostAction(plugin_id, item_id);
     return true;
 }
