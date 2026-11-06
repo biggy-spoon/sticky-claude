@@ -8,7 +8,13 @@
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
 
-#define BOARD_BUTTON_AI_PIN      GPIO_NUM_4   // long-press = record, short tap = confirm/toggle
+// Board power latch (schematic PWR_HOLD/PWR_LOCK). Pin numbers and the
+// drive-both-high behavior come from the handwriting pad firmware's
+// board_power.cpp, not from Seeed's docs.
+#define BOARD_POWER_HOLD_PIN     GPIO_NUM_45
+#define BOARD_POWER_LOCK_PIN     GPIO_NUM_46
+
+#define BOARD_BUTTON_AI_PIN      GPIO_NUM_4  // long-press = record, short tap = confirm/toggle
 // Confirmed from Seeed's own hardware-overview docs
 // (seeedstudio.com/sticky/docs/en/device-guide/hardware-overview, "Physical
 // buttons" row) and independently corroborated by a CNX Software review of

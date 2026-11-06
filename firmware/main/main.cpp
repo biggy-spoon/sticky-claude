@@ -1,6 +1,7 @@
 #include <cstdlib>
 
 #include "assistant_service.h"
+#include "board_config.h"
 #include "button_service.h"
 #include "captive_portal.h"
 #include "device_nav.h"
@@ -98,6 +99,14 @@ void AssistantTask(void*) {
 }  // namespace
 
 extern "C" void app_main() {
+    gpio_config_t latch_cfg = {};
+    latch_cfg.pin_bit_mask = (1ULL << BOARD_POWER_HOLD_PIN) | (1ULL << BOARD_POWER_LOCK_PIN);
+    latch_cfg.mode = GPIO_MODE_OUTPUT;
+    ESP_ERROR_CHECK(gpio_config(&latch_cfg));
+    gpio_set_level(BOARD_POWER_HOLD_PIN, 1);
+    gpio_set_level(BOARD_POWER_LOCK_PIN, 1);
+    vTaskDelay(pdMS_TO_TICKS(100));
+
     esp_err_t err = nvs_flash_init();
     if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         ESP_ERROR_CHECK(nvs_flash_erase());
