@@ -37,12 +37,32 @@ WHISPER_COMPUTE_TYPE = os.getenv("WHISPER_COMPUTE_TYPE", "int8")
 MAX_AUDIO_BYTES = 10 * 1024 * 1024  # generous ceiling; the device caps clips at ~10s
 
 SYSTEM_PROMPT_TEMPLATE = (
-    "You are a voice assistant replying to a short spoken note captured on a small "
-    "e-paper sticky-note device with no speaker. Your reply is rendered as plain text "
-    "on that screen, so keep it to 2-3 short sentences, no markdown, no lists. "
+    "You are a general-purpose voice assistant. The user can ask about anything, so don't "
+    "assume a question is about you or the device you run on. Their words were transcribed "
+    "from speech and may contain misheard words. Use web search for current events and for "
+    "anything you aren't sure of, and give the answer itself rather than saying what you "
+    "searched for. Your reply is shown as plain text on a small e-paper screen with no "
+    "speaker, so keep it to 2-4 short sentences, with no markdown, lists or citations. "
     "Today's date is {today}. When a tool is available for what the user is asking, use "
     "it rather than just describing what you would do."
 )
+
+# Models that accept the newer web search tool. The model setting is free text,
+# and an older model rejects the whole request if sent this version, so anything
+# not listed here gets the basic one.
+_WEB_SEARCH_20260209_MODELS = {
+    "claude-fable-5-1", "claude-fable-5", "claude-opus-5-5", "claude-opus-5", "claude-opus-4-8",
+    "claude-opus-4-7", "claude-opus-4-6", "claude-sonnet-5-5", "claude-sonnet-5",
+    "claude-sonnet-4-6", "claude-haiku-5-5",
+}
+
+
+def _web_search_tool(model: str) -> dict:
+    """Anthropic runs this tool itself, so there's no plugin behind it. max_uses
+    limits how long a reply can take and what it can cost, since each search is
+    billed."""
+    version = "20260209" if model in _WEB_SEARCH_20260209_MODELS else "20250305"
+    return {"type": f"web_search_{version}", "name": "web_search", "max_uses": 3}
 
 app = FastAPI(title="sticky-claude backend")
 whisper_model: WhisperModel | None = None
@@ -138,25 +158,38 @@ def _execute_tool(name: str, tool_input: dict, tool_owner: dict[str, str]) -> st
     return plugin.execute_tool(name, tool_input)
 
 
-def _converse_with_claude(transcript: str, api_key: str, max_tool_iterations: int = 3) -> str:
+def _final_text(content: list) -> str:
+    """The text after the last tool activity. Claude can write a line before a
+    search, like "Let me look that up", which isn't part of the answer."""
+    parts: list[str] = []
+    for block in content:
+        if block.type == "text":
+            parts.append(block.text)
+        elif block.type != "thinking":
+            parts = []
+    return "".join(parts).strip()
+
+
+def _converse_with_claude(transcript: str, api_key: str, max_tool_iterations: int = 5) -> str:
     client = Anthropic(api_key=api_key)
     model = settings.get_claude_model()
     system_prompt = SYSTEM_PROMPT_TEMPLATE.format(today=datetime.now(timezone.utc).date().isoformat())
     tool_defs, tool_owner = _collect_tools()
+    tool_defs.append(_web_search_tool(model))
 
     messages: list[dict] = [{"role": "user", "content": transcript}]
 
     for _ in range(max_tool_iterations):
-        kwargs = {"model": model, "max_tokens": 512, "system": system_prompt, "messages": messages}
-        if tool_defs:
-            kwargs["tools"] = tool_defs
-        response = client.messages.create(**kwargs)
-
-        if response.stop_reason != "tool_use":
-            return "".join(block.text for block in response.content
-                           if block.type == "text").strip()
+        # Thinking counts towards max_tokens, so this is well above the reply length.
+        response = client.messages.create(model=model, max_tokens=4096, system=system_prompt,
+                                          messages=messages, tools=tool_defs)
 
         messages.append({"role": "assistant", "content": response.content})
+        if response.stop_reason == "pause_turn":
+            continue  # a long search paused; sending it back as is resumes it
+        if response.stop_reason != "tool_use":
+            return _final_text(response.content) or "I don't have an answer for that."
+
         tool_results = []
         for block in response.content:
             if block.type != "tool_use":
@@ -273,8 +306,7 @@ def api_plugin_hub() -> dict:
 @app.get("/api/device/views")
 def api_device_views() -> dict:
     """Every configured plugin's own on-device screen, in a fixed order
-    (plugin registration order), for the firmware to page through with
-    the Up/Down buttons. The device's own home/conversation screen isn't
+    (plugin registration order), for the firmware to page through. The device's own home/conversation screen isn't
     included -- it's rendered locally by the firmware without a backend
     round-trip."""
     views = []
@@ -290,7 +322,7 @@ def api_device_views() -> dict:
             "title": view.title,
             "body": view.body,
             "items": [{"id": item.id, "text": item.text, "secondary": item.secondary,
-                       "checked": item.checked}
+                       "detail": item.detail, "checked": item.checked}
                       for item in (view.items or [])],
         })
     return {"views": views}
@@ -305,5 +337,8 @@ async def api_plugin_device_action(plugin_id: str, request: Request) -> dict:
     item_id = body.get("item_id")
     if not item_id:
         raise HTTPException(status_code=400, detail="item_id is required")
-    plugin.device_action(str(item_id))
+    checked = body.get("checked")
+    if not isinstance(checked, bool):
+        raise HTTPException(status_code=400, detail="checked must be true or false")
+    plugin.device_action(str(item_id), checked)
     return {"success": True}

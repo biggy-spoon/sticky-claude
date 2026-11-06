@@ -4,10 +4,13 @@ and no settings -- it works out of the box). One of the two default
 plugins shipped with the backend, alongside calendar_plugin.py.
 """
 import logging
+from datetime import datetime
 from typing import Optional
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+import settings
 import storage
-from .base import DeviceView, DeviceViewItem, Plugin
+from .base import DeviceView, DeviceViewItem, Plugin, SettingField
 
 log = logging.getLogger("sticky-claude.plugins.todo")
 
@@ -43,6 +46,16 @@ _TOOLS = [
 ]
 
 
+def _start_of_today() -> datetime:
+    name = settings.get("todo_timezone", "")
+    try:
+        now = datetime.now(ZoneInfo(name)) if name else datetime.now().astimezone()
+    except (ZoneInfoNotFoundError, ValueError):
+        log.warning("Unknown todo_timezone %r, using the server's timezone", name)
+        now = datetime.now().astimezone()
+    return now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+
 class TodoPlugin(Plugin):
     @property
     def id(self) -> str:
@@ -55,6 +68,12 @@ class TodoPlugin(Plugin):
     @property
     def description(self) -> str:
         return "A voice-driven todo list -- add, list, and complete items by speaking."
+
+    def settings_schema(self) -> list[SettingField]:
+        return [SettingField(
+            key="todo_timezone", label="Timezone for the daily reset",
+            placeholder="e.g. America/New_York (blank uses the server's timezone)",
+        )]
 
     def is_configured(self) -> bool:
         return True
@@ -92,18 +111,18 @@ class TodoPlugin(Plugin):
         }
 
     def device_view(self) -> Optional[DeviceView]:
-        open_todos = storage.list_todos(done=False)
-        return DeviceView(
-            view_type="list",
-            title="Todo list",
-            items=[DeviceViewItem(id=str(t["id"]), text=t["text"], checked=False)
-                   for t in open_todos],
-        )
+        # Completed items stay visible, struck through at the bottom, until the
+        # day ends. Unfinished items carry over.
+        items = [DeviceViewItem(id=str(t["id"]), text=t["text"], checked=False)
+                 for t in storage.list_todos(done=False)]
+        items += [DeviceViewItem(id=str(t["id"]), text=t["text"], checked=True)
+                  for t in storage.list_todos_done_since(_start_of_today())]
+        return DeviceView(view_type="list", title="Todo list", items=items)
 
-    def device_action(self, item_id: str) -> None:
+    def device_action(self, item_id: str, checked: bool) -> None:
         try:
             todo_id = int(item_id)
         except ValueError:
             log.warning("device_action got a non-numeric todo id: %r", item_id)
             return
-        storage.complete_todo_by_id(todo_id)
+        storage.set_todo_done(todo_id, checked)

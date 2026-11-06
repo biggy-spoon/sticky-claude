@@ -6,14 +6,15 @@
 - Display: 3.97" monochrome ePaper, 800x480, SSD1677 controller, SPI
 - Audio: single PDM microphone (no speaker — this device is **text-out only**)
 - Three physical buttons: AI (GPIO4, long-press = push-to-talk, short
-  press = confirm/toggle on a device-view screen), Up (GPIO5), and Down
-  (GPIO6) -- Up/Down page through plugin device-views. The AI button's
+  press = back), Up (GPIO5), and Down (GPIO6) -- Up/Down move between pages,
+  as do left and right swipes. The AI button's
   pin is physically shared with the device's power button, which has
   its own hardware-level long-hold behavior independent of firmware.
 - Touch: GT911 at I2C address 0x14 (SCL GPIO2, SDA GPIO3, INT GPIO21,
   RST GPIO41, EN GPIO42). The sensor is portrait 480x800, so
   `touch_service` maps it with `screen_x = 799 - raw_y` and
-  `screen_y = 479 - raw_x`. Measured on hardware.
+  `screen_y = 479 - raw_x`. Measured on hardware. It reports taps and swipes
+  (at least 60px within 1.5s).
 - Power latch: GPIO45 and GPIO46 are driven high at boot (schematic
   `PWR_HOLD`/`PWR_LOCK`).
 
@@ -131,7 +132,16 @@ repository is MIT.
   directly by a `todos` table in `storage.py` (no settings, no external
   service — it's the example of the simplest possible plugin). Voice
   input has no todo id to give back, so `complete_todo` matches by a
-  case-insensitive text search rather than requiring one.
+  case-insensitive text search rather than requiring one. On the device, items
+  finished today stay at the bottom, struck through. Earlier ones are left out
+  of `device_view()`, which is the daily reset, and stay in the table as
+  history. The day boundary uses the `todo_timezone` setting, or the server's
+  timezone if that's blank.
+- Web search isn't a plugin. `app.py` adds Anthropic's server-side tool to every
+  request, so Anthropic runs it and the results come back in the same response.
+  It uses `web_search_20260209` on models known to accept it and
+  `web_search_20250305` on anything else, because the model setting is free text
+  and an older model rejects the whole request if sent the newer version.
 - `plugin_hub.py` + `GET /api/plugin-hub` — fetches and caches
   `index.json` from the separate
   [`sticky-claude-plugin-hub`](https://github.com/biggy-spoon/sticky-claude-plugin-hub)
@@ -151,16 +161,18 @@ repository is MIT.
 - `Plugin.device_view()`/`device_action()` + `GET /api/device/views` +
   `POST /api/plugins/{id}/device-action` — the on-device counterpart to
   `dashboard_view()`: a plugin's own screen for the ePaper display,
-  paged to with the device's Up/Down buttons (see
+  paged to with the device's buttons or by swiping (see
   `firmware/components/device_nav`). Deliberately a small declarative
   payload (view_type + title + items), the same spirit as
   `SettingField`, rather than letting a plugin send anything it wants —
   the firmware only ever renders one of a few known view types, so a
   plugin (including a third-party one from the plugin hub) can describe
-  a screen but never execute code on the device. `device_action()`
-  handles confirming/toggling a row (tapping it, or a short press of the
-  AI button), by the row's id rather than text search since the device
-  has a real id to work with, unlike voice.
+  a screen but never execute code on the device. `device_action(item_id,
+  checked)` handles a tap on a checkable row, by the row's id rather than text
+  search since the device has a real id to work with, unlike voice. It's told
+  the state the row should have rather than asked to toggle it, so a repeated
+  request can't flip it back. An item's optional `detail` text opens on its own
+  screen when tapped.
 
 ## Open items
 

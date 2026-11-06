@@ -25,7 +25,6 @@ constexpr uint32_t kAssistantTaskStackWords = 6144;
 
 TaskHandle_t s_assistant_task = nullptr;
 esp_timer_handle_t s_recording_screen_timer = nullptr;
-bool s_wifi_connected = false;
 
 void ShowRecordingScreen(void*) { ui::ShowRecording(); }
 
@@ -33,21 +32,40 @@ void OnPressStart(button_service::ButtonId id, void*) {
     if (id != button_service::ButtonId::kAi) {
         return;  // Up/Down only act on release -- see OnPressEnd
     }
+    device_nav::PauseInput();
     // Capture starts now so the first words aren't lost, but the screen waits:
     // a tap shouldn't trigger a full e-paper refresh.
     recording_service::StartCapture();
     esp_timer_start_once(s_recording_screen_timer, kMinHoldMs * 1000ULL);
 }
 
-void OnTap(int x, int y, void*) { device_nav::OnTap(x, y); }
+void OnGesture(const touch_service::Gesture& gesture, void*) {
+    switch (gesture.type) {
+        case touch_service::GestureType::kTap:
+            device_nav::OnTap(gesture.x, gesture.y);
+            break;
+        case touch_service::GestureType::kSwipeLeft:
+            device_nav::Navigate(1);
+            break;
+        case touch_service::GestureType::kSwipeRight:
+            device_nav::Navigate(-1);
+            break;
+        case touch_service::GestureType::kSwipeUp:
+            device_nav::OnScroll(1);  // the content follows the finger up
+            break;
+        case touch_service::GestureType::kSwipeDown:
+            device_nav::OnScroll(-1);
+            break;
+    }
+}
 
 void OnPressEnd(button_service::ButtonId id, uint32_t held_ms, void*) {
     if (id == button_service::ButtonId::kUp) {
-        device_nav::OnUp();
+        device_nav::Navigate(-1);
         return;
     }
     if (id == button_service::ButtonId::kDown) {
-        device_nav::OnDown();
+        device_nav::Navigate(1);
         return;
     }
 
@@ -56,11 +74,8 @@ void OnPressEnd(button_service::ButtonId id, uint32_t held_ms, void*) {
     recording_service::StopCapture(&sample_count);
 
     if (held_ms < kMinHoldMs || sample_count == 0) {
-        // A tap toggles the highlighted row; with nothing to toggle it goes home.
-        if (!device_nav::OnConfirm()) {
-            device_nav::ResetToHome();
-            ui::ShowIdle(s_wifi_connected, 1 + device_nav::KnownPluginViewCount());
-        }
+        device_nav::ResumeInput();
+        device_nav::OnBack();
         return;
     }
 
@@ -76,6 +91,8 @@ void AssistantTask(void*) {
         size_t wav_len = 0;
         if (recording_service::BuildWav(&wav, &wav_len) != ESP_OK) {
             ESP_LOGW(kTag, "BuildWav failed");
+            device_nav::FinishConversation();
+            ui::ShowError("Couldn't prepare that recording");
             continue;
         }
 
@@ -85,10 +102,11 @@ void AssistantTask(void*) {
         const assistant_service::ConverseResult result = assistant_service::Converse(wav, wav_len);
         free(wav);
 
+        device_nav::FinishConversation();
         if (result.success) {
             ESP_LOGI(kTag, "transcript=%s", result.transcript.c_str());
             ESP_LOGI(kTag, "reply=%s", result.reply.c_str());
-            ui::ShowReply(result.transcript, result.reply);
+            ui::ShowReply(result.transcript, result.reply, 1 + device_nav::KnownPluginViewCount());
         } else {
             ESP_LOGW(kTag, "converse failed: http=%d error=%s", result.http_status,
                      result.error_message.c_str());
@@ -141,7 +159,7 @@ extern "C" void app_main() {
 
     button_service::SetHandlers(&OnPressStart, &OnPressEnd, nullptr);
 
-    touch_service::SetTapHandler(&OnTap, nullptr);
+    touch_service::SetGestureHandler(&OnGesture, nullptr);
     err = touch_service::Init();
     if (err != ESP_OK) {
         ESP_LOGE(kTag, "touch unavailable: %s", esp_err_to_name(err));
@@ -149,13 +167,14 @@ extern "C" void app_main() {
 
     const settings_service::Settings settings = settings_service::Get();
     ESP_LOGI(kTag, "connecting to WiFi...");
-    s_wifi_connected =
+    const bool wifi_connected =
         wifi_service::ConnectStaBlocking(settings.wifi_ssid, settings.wifi_password) == ESP_OK;
-    if (!s_wifi_connected) {
+    device_nav::SetWifiConnected(wifi_connected);
+    if (wifi_connected) {
+        device_nav::Preload();
+    } else {
         ESP_LOGE(kTag, "WiFi connect failed; recording will work but uploads will fail");
+        ui::ShowIdle(false);
     }
-    device_nav::SetWifiConnected(s_wifi_connected);
-
-    ui::ShowIdle(s_wifi_connected, 1 + device_nav::KnownPluginViewCount());
-    ESP_LOGI(kTag, "ready: hold the AI button to record, Up/Down to page through plugin views");
+    ESP_LOGI(kTag, "ready: hold the AI button to record, Up/Down or swipe to change page");
 }

@@ -4,10 +4,14 @@ ESP-IDF (C++) firmware for the Seeed Studio reTerminal Sticky (ESP32-S3R8).
 Hold the AI/record button, speak, release — the clip gets POSTed to the
 `backend` service, which transcribes it and asks Claude (with calendar
 tool-use if you've connected one), and the reply renders on the ePaper
-screen. The Up/Down buttons page through each configured plugin's own
-on-device screen (see `device_nav`, below). Tap a row on the touchscreen to
-select it, and tap a checkable row to complete it (e.g. a todo). A short press
-of the AI button also toggles the highlighted row.
+screen.
+
+Swipe left or right, or press Up/Down, to move between home and each configured
+plugin's own on-device screen (see `device_nav`, below). Swipe up or down to
+scroll. Tap a checkable row to toggle it (e.g. a todo), or a row with details to
+open them (e.g. a calendar event). A short press of the AI button goes back:
+from details to the list, from a plugin screen to home, and on home it clears
+any reply.
 
 ## Build
 
@@ -48,11 +52,11 @@ and reboots into normal operation.
 | `captive_portal` | First-run AP + DNS hijack + HTTP setup form |
 | `wifi_service` | STA connect (using `settings_service` values) + SoftAP mode |
 | `assistant_service` | POSTs the WAV to the backend, parses `{transcript, reply}` |
-| `device_nav` | Up/Down paging and tap handling for plugin device-views (`GET /api/device/views`), confirm/toggle (`POST /api/plugins/{id}/device-action`) |
-| `touch_service` | GT911 bring-up, polling, tap detection and mapping to screen coordinates |
+| `device_nav` | Page changes, scrolling, taps and "back" across plugin device-views. Draws from a cached `GET /api/device/views` and refreshes in the background; sends toggles with `POST /api/plugins/{id}/device-action` |
+| `touch_service` | GT911 bring-up, polling, tap and swipe detection, and mapping to screen coordinates |
 | `epaper_display` | SPI transport + SSD1677 command set + 1bpp framebuffer |
 | `ui` | LVGL screens rendered via `epaper_display`. Its own task owns LVGL and the panel, so `Show*` calls never block; if several arrive during a refresh, only the newest is drawn |
-| `main` | Wires button hold → record → upload → display, Up/Down → `device_nav`, and first-run routing |
+| `main` | Wires button hold → record → upload → display, buttons and gestures → `device_nav`, and first-run routing |
 
 ## Known gaps
 
@@ -76,7 +80,13 @@ and reboots into normal operation.
 5. **No partial e-paper refresh.** Every screen change is a full refresh
    (a few seconds). Fine for this project's rate of UI changes; would
    need real work to support faster partial updates if that ever
-   mattered here.
+   mattered here. Because of this, a tap made during a refresh is ignored,
+   since it might land on a row that's about to move.
+6. **Text views aren't drawn.** A plugin returning `view_type="text"` shows
+   "Nothing here yet", because the firmware only draws list items and ignores
+   `body`.
+7. **Very long lists are cut short.** LVGL's 32KB pool holds about 20 rows, so
+   drawing stops when less than 3KB is free, and later rows can't be reached.
 
 ## Licensing note
 

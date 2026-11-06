@@ -30,6 +30,11 @@ constexpr lv_coord_t kViewWidth = kScreenWidth - 2 * kViewMargin;
 constexpr lv_coord_t kViewHeaderHeight = 68;
 constexpr lv_coord_t kRowMinHeight = 68;  // comfortably larger than a fingertip
 constexpr lv_coord_t kCheckboxSize = 30;
+constexpr lv_coord_t kIndicatorWidth = 90;  // room reserved in the header for the dots
+constexpr lv_coord_t kPageOverlap = 28;     // detail text kept on screen when paging through it
+// A row takes about 800 bytes of LVGL's fixed pool, and running out of it crashes
+// the device, so a very long list stops here rather than drawing every row.
+constexpr size_t kMinLvglFreeForRow = 3000;
 
 struct RowBand {
     lv_coord_t y1;
@@ -54,6 +59,7 @@ lv_obj_t* s_screen_reply = nullptr;
 lv_obj_t* s_screen_error = nullptr;
 lv_obj_t* s_screen_loading = nullptr;
 lv_obj_t* s_screen_device_view = nullptr;
+lv_obj_t* s_screen_detail = nullptr;
 
 lv_obj_t* s_idle_status_label = nullptr;
 lv_obj_t* s_reply_transcript_label = nullptr;
@@ -62,20 +68,53 @@ lv_obj_t* s_error_message_label = nullptr;
 lv_obj_t* s_device_view_title = nullptr;
 lv_obj_t* s_device_view_position = nullptr;
 lv_obj_t* s_device_view_list = nullptr;
+lv_obj_t* s_detail_area = nullptr;
+lv_obj_t* s_detail_title = nullptr;
+lv_obj_t* s_detail_body = nullptr;
+size_t s_rendered_rows = 0;
 
 bool s_idle_wifi = false;
 int s_idle_pages = -1;
 
-// Page-position indicator on the idle screen: up to 3 dots (home plus the
-// next couple of plugin views) with an arrow if there are more beyond that.
+// Page position: a window of 3 dots with the current page filled, and an arrow
+// on each side that has more pages beyond the window.
 constexpr int kPageDotCount = 3;
-constexpr lv_coord_t kPageDotSize = 10;
-lv_obj_t* s_page_indicator = nullptr;
-lv_obj_t* s_page_dots[kPageDotCount] = {nullptr, nullptr, nullptr};
-lv_obj_t* s_page_arrow = nullptr;
+constexpr lv_coord_t kPageDotSize = 12;
 
-void SetDotFilled(lv_obj_t* dot, bool filled) {
-    lv_obj_set_style_bg_opa(dot, filled ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
+struct PageIndicator {
+    lv_obj_t* root = nullptr;
+    lv_obj_t* left = nullptr;
+    lv_obj_t* dots[kPageDotCount] = {};
+    lv_obj_t* right = nullptr;
+};
+
+PageIndicator s_idle_indicator;
+PageIndicator s_reply_indicator;
+PageIndicator s_view_indicator;
+PageIndicator s_detail_indicator;
+
+void SetHidden(lv_obj_t* obj, bool hidden) {
+    if (hidden) {
+        lv_obj_add_flag(obj, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_clear_flag(obj, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+void SetPageIndicator(const PageIndicator& indicator, PagePos page) {
+    SetHidden(indicator.root, page.total <= 1);
+    if (page.total <= 1) {
+        return;
+    }
+    const int max_start = page.total > kPageDotCount ? page.total - kPageDotCount : 0;
+    const int start = LV_CLAMP(0, page.index - 1, max_start);
+    for (int i = 0; i < kPageDotCount; ++i) {
+        SetHidden(indicator.dots[i], i >= page.total);
+        lv_obj_set_style_bg_opa(indicator.dots[i],
+                                start + i == page.index ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
+    }
+    SetHidden(indicator.left, start == 0);
+    SetHidden(indicator.right, start + kPageDotCount >= page.total);
 }
 
 void AppendCodepoint(std::string* out, uint32_t cp) {
@@ -218,6 +257,32 @@ lv_obj_t* AddPlainObject(lv_obj_t* parent) {
     return obj;
 }
 
+void BuildPageIndicator(lv_obj_t* screen, PageIndicator* indicator) {
+    indicator->root = AddPlainObject(screen);
+    lv_obj_set_size(indicator->root, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_layout(indicator->root, LV_LAYOUT_FLEX);
+    lv_obj_set_flex_flow(indicator->root, LV_FLEX_FLOW_ROW);
+    lv_obj_set_style_pad_column(indicator->root, 6, 0);
+    lv_obj_set_flex_align(indicator->root, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER);
+
+    indicator->left = AddLabel(indicator->root, &lv_font_montserrat_14, LV_LABEL_LONG_CLIP, 0);
+    lv_label_set_text(indicator->left, LV_SYMBOL_LEFT);
+    for (lv_obj_t*& dot : indicator->dots) {
+        dot = AddPlainObject(indicator->root);
+        lv_obj_set_size(dot, kPageDotSize, kPageDotSize);
+        lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, 0);
+        lv_obj_set_style_border_width(dot, 2, 0);
+        lv_obj_set_style_border_color(dot, lv_color_black(), 0);
+        lv_obj_set_style_bg_color(dot, lv_color_black(), 0);
+    }
+    indicator->right = AddLabel(indicator->root, &lv_font_montserrat_14, LV_LABEL_LONG_CLIP, 0);
+    lv_label_set_text(indicator->right, LV_SYMBOL_RIGHT);
+
+    lv_obj_align(indicator->root, LV_ALIGN_TOP_RIGHT, -kViewMargin, 28);
+    SetHidden(indicator->root, true);
+}
+
 void BuildIdleScreen() {
     s_screen_idle = CreateScreen();
 
@@ -235,32 +300,7 @@ void BuildIdleScreen() {
     lv_obj_set_style_text_align(prompt, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_align(prompt, LV_ALIGN_CENTER, 0, 0);
 
-    s_page_indicator = lv_obj_create(s_screen_idle);
-    lv_obj_set_size(s_page_indicator, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-    lv_obj_set_style_border_width(s_page_indicator, 0, 0);
-    lv_obj_set_style_pad_all(s_page_indicator, 0, 0);
-    lv_obj_set_style_bg_opa(s_page_indicator, LV_OPA_TRANSP, 0);
-    lv_obj_set_layout(s_page_indicator, LV_LAYOUT_FLEX);
-    lv_obj_set_flex_flow(s_page_indicator, LV_FLEX_FLOW_ROW);
-    lv_obj_set_style_pad_column(s_page_indicator, 6, 0);
-    lv_obj_set_flex_align(s_page_indicator, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
-                          LV_FLEX_ALIGN_CENTER);
-    lv_obj_clear_flag(s_page_indicator, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_align(s_page_indicator, LV_ALIGN_BOTTOM_RIGHT, -20, -20);
-
-    for (lv_obj_t*& dot : s_page_dots) {
-        dot = lv_obj_create(s_page_indicator);
-        lv_obj_set_size(dot, kPageDotSize, kPageDotSize);
-        lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, 0);
-        lv_obj_set_style_border_width(dot, 1, 0);
-        lv_obj_set_style_border_color(dot, lv_color_black(), 0);
-        lv_obj_set_style_bg_color(dot, lv_color_black(), 0);
-        lv_obj_set_style_pad_all(dot, 0, 0);
-        lv_obj_clear_flag(dot, LV_OBJ_FLAG_SCROLLABLE);
-    }
-
-    s_page_arrow = AddLabel(s_page_indicator, &lv_font_montserrat_14, LV_LABEL_LONG_WRAP, 0);
-    lv_label_set_text(s_page_arrow, LV_SYMBOL_RIGHT);
+    BuildPageIndicator(s_screen_idle, &s_idle_indicator);
 }
 
 void BuildRecordingScreen() {
@@ -303,6 +343,8 @@ void BuildReplyScreen() {
     s_reply_body_label = AddLabel(s_screen_reply, &lv_font_montserrat_20, LV_LABEL_LONG_WRAP,
                                   kContentWidth);
     lv_obj_align(s_reply_body_label, LV_ALIGN_TOP_LEFT, kMargin, 184);
+
+    BuildPageIndicator(s_screen_reply, &s_reply_indicator);
 }
 
 void BuildErrorScreen() {
@@ -330,12 +372,12 @@ void BuildDeviceViewScreen() {
     s_screen_device_view = CreateScreen();
 
     s_device_view_title = AddLabel(s_screen_device_view, &lv_font_montserrat_28, LV_LABEL_LONG_DOT,
-                                   kViewWidth - 120);
+                                   kViewWidth - kIndicatorWidth - 130);
     lv_obj_align(s_device_view_title, LV_ALIGN_TOP_LEFT, kViewMargin, 18);
 
     s_device_view_position = AddLabel(s_screen_device_view, &lv_font_montserrat_16,
                                       LV_LABEL_LONG_CLIP, 0);
-    lv_obj_align(s_device_view_position, LV_ALIGN_TOP_RIGHT, -kViewMargin, 28);
+    lv_obj_align(s_device_view_position, LV_ALIGN_TOP_RIGHT, -kViewMargin - kIndicatorWidth, 28);
 
     lv_obj_t* rule = AddPlainObject(s_screen_device_view);
     lv_obj_set_size(rule, kViewWidth, 2);
@@ -350,11 +392,42 @@ void BuildDeviceViewScreen() {
     lv_obj_set_scrollbar_mode(s_device_view_list, LV_SCROLLBAR_MODE_OFF);
     lv_obj_set_layout(s_device_view_list, LV_LAYOUT_FLEX);
     lv_obj_set_flex_flow(s_device_view_list, LV_FLEX_FLOW_COLUMN);
+
+    BuildPageIndicator(s_screen_device_view, &s_view_indicator);
+}
+
+void BuildDetailScreen() {
+    s_screen_detail = CreateScreen();
+
+    lv_obj_t* back = AddLabel(s_screen_detail, &lv_font_montserrat_20, LV_LABEL_LONG_CLIP, 0);
+    lv_label_set_text(back, LV_SYMBOL_LEFT " Back");
+    lv_obj_align(back, LV_ALIGN_TOP_LEFT, kViewMargin, 24);
+
+    lv_obj_t* rule = AddPlainObject(s_screen_detail);
+    lv_obj_set_size(rule, kViewWidth, 2);
+    lv_obj_set_style_bg_opa(rule, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(rule, lv_color_black(), 0);
+    lv_obj_align(rule, LV_ALIGN_TOP_LEFT, kViewMargin, kViewHeaderHeight - 8);
+
+    s_detail_area = AddPlainObject(s_screen_detail);
+    lv_obj_add_flag(s_detail_area, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_size(s_detail_area, kViewWidth, kScreenHeight - kViewHeaderHeight - 8);
+    lv_obj_align(s_detail_area, LV_ALIGN_TOP_LEFT, kViewMargin, kViewHeaderHeight);
+    lv_obj_set_scrollbar_mode(s_detail_area, LV_SCROLLBAR_MODE_OFF);
+    lv_obj_set_style_pad_top(s_detail_area, 8, 0);
+    lv_obj_set_style_pad_row(s_detail_area, 16, 0);
+    lv_obj_set_layout(s_detail_area, LV_LAYOUT_FLEX);
+    lv_obj_set_flex_flow(s_detail_area, LV_FLEX_FLOW_COLUMN);
+
+    s_detail_title = AddLabel(s_detail_area, &lv_font_montserrat_28, LV_LABEL_LONG_WRAP, 0);
+    lv_obj_set_width(s_detail_title, lv_pct(100));
+    s_detail_body = AddLabel(s_detail_area, &lv_font_montserrat_20, LV_LABEL_LONG_WRAP, 0);
+    lv_obj_set_width(s_detail_body, lv_pct(100));
+
+    BuildPageIndicator(s_screen_detail, &s_detail_indicator);
 }
 
 lv_obj_t* AddDeviceViewRow(const DeviceViewRow& row) {
-    const lv_color_t ink = row.highlighted ? lv_color_white() : lv_color_black();
-
     lv_obj_t* obj = AddPlainObject(s_device_view_list);
     lv_obj_set_width(obj, lv_pct(100));
     lv_obj_set_height(obj, LV_SIZE_CONTENT);
@@ -368,21 +441,16 @@ lv_obj_t* AddDeviceViewRow(const DeviceViewRow& row) {
     lv_obj_set_style_border_side(obj, LV_BORDER_SIDE_BOTTOM, 0);
     lv_obj_set_style_border_width(obj, 1, 0);
     lv_obj_set_style_border_color(obj, lv_color_black(), 0);
-    if (row.highlighted) {
-        lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, 0);
-        lv_obj_set_style_bg_color(obj, lv_color_black(), 0);
-    }
 
     if (row.checkable) {
         lv_obj_t* box = AddPlainObject(obj);
         lv_obj_set_size(box, kCheckboxSize, kCheckboxSize);
         lv_obj_set_style_radius(box, 6, 0);
         lv_obj_set_style_border_width(box, 2, 0);
-        lv_obj_set_style_border_color(box, ink, 0);
+        lv_obj_set_style_border_color(box, lv_color_black(), 0);
         if (row.checked) {
             lv_obj_t* mark = AddLabel(box, &lv_font_montserrat_20, LV_LABEL_LONG_CLIP, 0);
             lv_label_set_text(mark, LV_SYMBOL_OK);
-            lv_obj_set_style_text_color(mark, ink, 0);
             lv_obj_center(mark);
         }
     }
@@ -397,15 +465,55 @@ lv_obj_t* AddDeviceViewRow(const DeviceViewRow& row) {
     lv_obj_t* primary = AddLabel(column, &lv_font_montserrat_20, LV_LABEL_LONG_WRAP, 0);
     lv_obj_set_width(primary, lv_pct(100));
     lv_label_set_text(primary, row.text.c_str());
-    lv_obj_set_style_text_color(primary, ink, 0);
+    if (row.checked) {
+        lv_obj_set_style_text_decor(primary, LV_TEXT_DECOR_STRIKETHROUGH, 0);
+    }
 
     if (!row.secondary.empty()) {
         lv_obj_t* secondary = AddLabel(column, &lv_font_montserrat_16, LV_LABEL_LONG_WRAP, 0);
         lv_obj_set_width(secondary, lv_pct(100));
         lv_label_set_text(secondary, row.secondary.c_str());
-        lv_obj_set_style_text_color(secondary, ink, 0);
     }
     return obj;
+}
+
+// Publishes the on-screen position of each row for hit testing, and updates the
+// header's count. Rows scrolled out of view get an empty band, which never
+// matches. Runs on the UI task only.
+void UpdateRowGeometry(size_t total_rows) {
+    lv_area_t list_area;
+    lv_obj_get_coords(s_device_view_list, &list_area);
+
+    std::vector<RowBand> bands;
+    bands.reserve(s_rendered_rows);
+    int first_visible = -1;
+    int last_visible = -1;
+    for (size_t i = 0; i < s_rendered_rows; ++i) {
+        lv_area_t area;
+        lv_obj_get_coords(lv_obj_get_child(s_device_view_list, i), &area);
+        bands.push_back({LV_MAX(area.y1, list_area.y1), LV_MIN(area.y2, list_area.y2)});
+        if (area.y1 >= list_area.y1 && area.y2 <= list_area.y2) {
+            if (first_visible < 0) {
+                first_visible = static_cast<int>(i);
+            }
+            last_visible = static_cast<int>(i);
+        }
+    }
+
+    char position[48] = "";
+    if (first_visible == 0 && last_visible + 1 == static_cast<int>(total_rows)) {
+        snprintf(position, sizeof(position), "%u item%s", static_cast<unsigned>(total_rows),
+                 total_rows == 1 ? "" : "s");
+    } else if (first_visible >= 0) {
+        snprintf(position, sizeof(position), "%d-%d of %u", first_visible + 1, last_visible + 1,
+                 static_cast<unsigned>(total_rows));
+    }
+    lv_label_set_text(s_device_view_position, position);
+    lv_obj_align(s_device_view_position, LV_ALIGN_TOP_RIGHT, -kViewMargin - kIndicatorWidth, 28);
+
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    s_row_bands = std::move(bands);
+    xSemaphoreGive(s_lock);
 }
 
 // Runs on the UI task only.
@@ -420,22 +528,27 @@ void ShowScreen(lv_obj_t* screen) {
 }
 
 // Runs on the UI task only.
-void RenderDeviceView(const std::string& title, const std::vector<DeviceViewRow>& rows) {
+void RenderDeviceView(const std::string& title, const std::vector<DeviceViewRow>& rows,
+                      PagePos page, bool keep_scroll) {
+    const lv_coord_t saved_scroll = keep_scroll ? lv_obj_get_scroll_y(s_device_view_list) : 0;
+
     lv_label_set_text(s_device_view_title, title.c_str());
+    SetPageIndicator(s_view_indicator, page);
     lv_obj_clean(s_device_view_list);
     lv_obj_scroll_to_y(s_device_view_list, 0, LV_ANIM_OFF);
 
-    std::vector<lv_obj_t*> row_objs;
-    row_objs.reserve(rows.size());
-    lv_obj_t* highlighted = nullptr;
-    int highlighted_index = -1;
-    for (size_t i = 0; i < rows.size(); ++i) {
-        lv_obj_t* obj = AddDeviceViewRow(rows[i]);
-        row_objs.push_back(obj);
-        if (rows[i].highlighted) {
-            highlighted = obj;
-            highlighted_index = static_cast<int>(i);
+    s_rendered_rows = 0;
+    lv_mem_monitor_t mem;
+    for (const DeviceViewRow& row : rows) {
+        lv_mem_monitor(&mem);
+        if (mem.free_size < kMinLvglFreeForRow) {
+            ESP_LOGW(kTag, "stopped at %u of %u rows: lvgl_free=%u",
+                     static_cast<unsigned>(s_rendered_rows), static_cast<unsigned>(rows.size()),
+                     static_cast<unsigned>(mem.free_size));
+            break;
         }
+        AddDeviceViewRow(row);
+        ++s_rendered_rows;
     }
 
     if (rows.empty()) {
@@ -444,43 +557,88 @@ void RenderDeviceView(const std::string& title, const std::vector<DeviceViewRow>
         lv_label_set_text(empty, "Nothing here yet.");
         lv_obj_set_style_pad_top(empty, 24, 0);
         lv_obj_set_style_text_align(empty, LV_TEXT_ALIGN_CENTER, 0);
-        lv_label_set_text(s_device_view_position, "");
-    } else {
-        char position[24];
-        snprintf(position, sizeof(position), "%d / %u",
-                 highlighted_index >= 0 ? highlighted_index + 1 : 1,
-                 static_cast<unsigned>(rows.size()));
-        lv_label_set_text(s_device_view_position, position);
     }
-    lv_obj_align(s_device_view_position, LV_ALIGN_TOP_RIGHT, -kViewMargin, 28);
 
     lv_obj_update_layout(s_screen_device_view);
-    if (highlighted != nullptr) {
-        lv_obj_scroll_to_view(highlighted, LV_ANIM_OFF);
+    if (saved_scroll > 0) {
+        const lv_coord_t max_scroll = LV_MAX(lv_obj_get_scroll_bottom(s_device_view_list), 0);
+        lv_obj_scroll_to_y(s_device_view_list, LV_MIN(saved_scroll, max_scroll), LV_ANIM_OFF);
         lv_obj_update_layout(s_screen_device_view);
     }
-
-    lv_area_t list_area;
-    lv_obj_get_coords(s_device_view_list, &list_area);
-    std::vector<RowBand> bands;
-    bands.reserve(row_objs.size());
-    for (lv_obj_t* obj : row_objs) {
-        lv_area_t area;
-        lv_obj_get_coords(obj, &area);
-        bands.push_back({LV_MAX(area.y1, list_area.y1), LV_MIN(area.y2, list_area.y2)});
-    }
+    UpdateRowGeometry(s_rendered_rows);
 
     xSemaphoreTake(s_lock, portMAX_DELAY);
-    s_row_bands = std::move(bands);
     s_device_view_shown = true;
     xSemaphoreGive(s_lock);
 
     ShowScreen(s_screen_device_view);
 
-    lv_mem_monitor_t mem;
     lv_mem_monitor(&mem);
-    ESP_LOGI(kTag, "device view: rows=%u lvgl_free=%u", static_cast<unsigned>(rows.size()),
+    ESP_LOGI(kTag, "device view: rows=%u lvgl_free=%u", static_cast<unsigned>(s_rendered_rows),
              static_cast<unsigned>(mem.free_size));
+}
+
+// Where the list should move to, snapped so rows aren't cut off at the top:
+// forward to the first row not fully visible, back by about a screen.
+lv_coord_t NextListScroll(int direction) {
+    const lv_coord_t current = lv_obj_get_scroll_y(s_device_view_list);
+    const lv_coord_t height = lv_obj_get_content_height(s_device_view_list);
+    const lv_coord_t limit = current + LV_MAX(lv_obj_get_scroll_bottom(s_device_view_list), 0);
+
+    if (direction > 0) {
+        for (size_t i = 0; i < s_rendered_rows; ++i) {
+            lv_obj_t* row = lv_obj_get_child(s_device_view_list, i);
+            const lv_coord_t top = lv_obj_get_y(row);
+            if (top + lv_obj_get_height(row) > current + height) {
+                // A row taller than the screen still has to make progress.
+                return LV_MIN(top > current ? top : current + height, limit);
+            }
+        }
+        return limit;
+    }
+
+    const lv_coord_t wanted = LV_MAX(current - height, 0);
+    for (size_t i = 0; i < s_rendered_rows; ++i) {
+        const lv_coord_t top = lv_obj_get_y(lv_obj_get_child(s_device_view_list, i));
+        if (top >= wanted) {
+            return top < current ? top : wanted;
+        }
+    }
+    return wanted;
+}
+
+lv_coord_t NextDetailScroll(int direction) {
+    const lv_coord_t current = lv_obj_get_scroll_y(s_detail_area);
+    const lv_coord_t step = lv_obj_get_content_height(s_detail_area) - kPageOverlap;
+    if (direction > 0) {
+        return current + LV_MIN(step, LV_MAX(lv_obj_get_scroll_bottom(s_detail_area), 0));
+    }
+    return LV_MAX(current - step, 0);
+}
+
+// Runs on the UI task only.
+void RenderScroll(int direction) {
+    const lv_obj_t* screen = lv_scr_act();
+    lv_obj_t* area = nullptr;
+    lv_coord_t target = 0;
+    if (screen == s_screen_device_view) {
+        area = s_device_view_list;
+        target = NextListScroll(direction);
+    } else if (screen == s_screen_detail) {
+        area = s_detail_area;
+        target = NextDetailScroll(direction);
+    } else {
+        return;
+    }
+    if (target == lv_obj_get_scroll_y(area)) {
+        return;  // already at this end, and a refresh would change nothing
+    }
+    lv_obj_scroll_to_y(area, target, LV_ANIM_OFF);
+    lv_obj_update_layout(lv_scr_act());
+    if (area == s_device_view_list) {
+        UpdateRowGeometry(s_rendered_rows);
+    }
+    lv_refr_now(nullptr);
 }
 
 void UiTask(void*) {
@@ -556,6 +714,7 @@ esp_err_t Init() {
     BuildErrorScreen();
     BuildLoadingScreen();
     BuildDeviceViewScreen();
+    BuildDetailScreen();
 
     s_lock = xSemaphoreCreateMutex();
     if (s_lock == nullptr) {
@@ -572,34 +731,16 @@ esp_err_t Init() {
 void ShowIdle(bool wifi_connected, int total_pages) {
     Post([wifi_connected, total_pages] {
         // A needless two-second refresh would be very visible on e-paper.
+        const int pages = total_pages > 1 ? total_pages : 1;
         if (lv_scr_act() == s_screen_idle && s_idle_wifi == wifi_connected &&
-            s_idle_pages == total_pages) {
+            s_idle_pages == pages) {
             return;
         }
         s_idle_wifi = wifi_connected;
-        s_idle_pages = total_pages;
+        s_idle_pages = pages;
         lv_label_set_text(s_idle_status_label,
                           wifi_connected ? "Connected" : "No WiFi -- uploads will fail");
-
-        if (total_pages <= 1) {
-            lv_obj_add_flag(s_page_indicator, LV_OBJ_FLAG_HIDDEN);
-        } else {
-            lv_obj_clear_flag(s_page_indicator, LV_OBJ_FLAG_HIDDEN);
-            const int dot_count = total_pages < kPageDotCount ? total_pages : kPageDotCount;
-            for (int i = 0; i < kPageDotCount; ++i) {
-                if (i < dot_count) {
-                    lv_obj_clear_flag(s_page_dots[i], LV_OBJ_FLAG_HIDDEN);
-                    SetDotFilled(s_page_dots[i], i == 0);  // home is always first and current
-                } else {
-                    lv_obj_add_flag(s_page_dots[i], LV_OBJ_FLAG_HIDDEN);
-                }
-            }
-            if (total_pages > kPageDotCount) {
-                lv_obj_clear_flag(s_page_arrow, LV_OBJ_FLAG_HIDDEN);
-            } else {
-                lv_obj_add_flag(s_page_arrow, LV_OBJ_FLAG_HIDDEN);
-            }
-        }
+        SetPageIndicator(s_idle_indicator, {0, pages});
         ShowScreen(s_screen_idle);
     });
 }
@@ -612,10 +753,11 @@ void ShowThinking() {
     Post([] { ShowScreen(s_screen_thinking); });
 }
 
-void ShowReply(const std::string& transcript, const std::string& reply) {
-    Post([transcript = SanitizeText(transcript), reply = SanitizeText(reply)] {
+void ShowReply(const std::string& transcript, const std::string& reply, int total_pages) {
+    Post([transcript = SanitizeText(transcript), reply = SanitizeText(reply), total_pages] {
         lv_label_set_text(s_reply_transcript_label, transcript.c_str());
         lv_label_set_text(s_reply_body_label, reply.c_str());
+        SetPageIndicator(s_reply_indicator, {0, total_pages});
         ShowScreen(s_screen_reply);
     });
 }
@@ -631,13 +773,41 @@ void ShowLoading() {
     Post([] { ShowScreen(s_screen_loading); });
 }
 
-void ShowDeviceView(const std::string& title, const std::vector<DeviceViewRow>& rows) {
+void ShowDeviceView(const std::string& title, const std::vector<DeviceViewRow>& rows,
+                    PagePos page, bool keep_scroll) {
     std::vector<DeviceViewRow> clean = rows;
     for (DeviceViewRow& row : clean) {
         row.text = SanitizeText(row.text);
         row.secondary = SanitizeText(row.secondary);
     }
-    Post([title = SanitizeText(title), clean = std::move(clean)] { RenderDeviceView(title, clean); });
+    Post([title = SanitizeText(title), clean = std::move(clean), page, keep_scroll] {
+        RenderDeviceView(title, clean, page, keep_scroll);
+    });
+}
+
+void ShowDetail(const std::string& title, const std::string& body, PagePos page) {
+    Post([title = SanitizeText(title), body = SanitizeText(body), page] {
+        lv_label_set_text(s_detail_title, title.c_str());
+        lv_label_set_text(s_detail_body, body.c_str());
+        SetPageIndicator(s_detail_indicator, page);
+        lv_obj_update_layout(s_screen_detail);
+        lv_obj_scroll_to_y(s_detail_area, 0, LV_ANIM_OFF);
+        ShowScreen(s_screen_detail);
+    });
+}
+
+void Scroll(int direction) {
+    if (IsBusy()) {
+        return;
+    }
+    Post([direction] { RenderScroll(direction); });
+}
+
+bool IsBusy() {
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    const bool busy = s_rendering || static_cast<bool>(s_pending);
+    xSemaphoreGive(s_lock);
+    return busy;
 }
 
 int HitTestDeviceViewRow(int x, int y) {

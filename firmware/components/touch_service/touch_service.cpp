@@ -30,12 +30,14 @@ constexpr uint8_t kStatusCountMask = 0x0F;
 
 constexpr int64_t kMaxTapUs = 800 * 1000;
 constexpr int kMaxTapMovePx = 24;
+constexpr int64_t kMaxSwipeUs = 1500 * 1000;
+constexpr int kMinSwipePx = 60;
 // Ends a contact if the chip stops sending frames without a release frame.
 constexpr int64_t kContactStaleUs = 150 * 1000;
 
 i2c_master_bus_handle_t s_bus = nullptr;
 i2c_master_dev_handle_t s_dev = nullptr;
-TapHandler s_handler = nullptr;
+GestureHandler s_handler = nullptr;
 void* s_context = nullptr;
 
 esp_err_t ReadReg(uint16_t reg, uint8_t* out, size_t len) {
@@ -115,16 +117,35 @@ void TouchTask(void*) {
     bool moved = false;
     int start_x = 0;
     int start_y = 0;
+    int last_x = 0;
+    int last_y = 0;
     int64_t start_us = 0;
     int64_t last_frame_us = 0;
     int failures = 0;
 
     auto end_contact = [&](int64_t now) {
         touching = false;
-        if (!moved && now - start_us <= kMaxTapUs && s_handler != nullptr) {
-            ESP_LOGI(kTag, "tap x=%d y=%d", start_x, start_y);
-            s_handler(start_x, start_y, s_context);
+        if (s_handler == nullptr) {
+            return;
         }
+        const int64_t duration = now - start_us;
+        const int dx = last_x - start_x;
+        const int dy = last_y - start_y;
+        Gesture gesture = {GestureType::kTap, start_x, start_y};
+        if (!moved) {
+            if (duration > kMaxTapUs) {
+                return;
+            }
+        } else if (duration > kMaxSwipeUs || (abs(dx) < kMinSwipePx && abs(dy) < kMinSwipePx)) {
+            return;
+        } else if (abs(dx) > abs(dy)) {
+            gesture.type = dx < 0 ? GestureType::kSwipeLeft : GestureType::kSwipeRight;
+        } else {
+            gesture.type = dy < 0 ? GestureType::kSwipeUp : GestureType::kSwipeDown;
+        }
+        ESP_LOGI(kTag, "gesture type=%d x=%d y=%d dx=%d dy=%d", static_cast<int>(gesture.type),
+                 start_x, start_y, dx, dy);
+        s_handler(gesture, s_context);
     };
 
     while (true) {
@@ -163,6 +184,8 @@ void TouchTask(void*) {
                 int y = 0;
                 MapToScreen(point[0] | (point[1] << 8), point[2] | (point[3] << 8), &x, &y);
                 last_frame_us = now;
+                last_x = x;
+                last_y = y;
                 if (!touching) {
                     touching = true;
                     moved = false;
@@ -180,7 +203,7 @@ void TouchTask(void*) {
 
 }  // namespace
 
-void SetTapHandler(TapHandler handler, void* context) {
+void SetGestureHandler(GestureHandler handler, void* context) {
     s_handler = handler;
     s_context = context;
 }

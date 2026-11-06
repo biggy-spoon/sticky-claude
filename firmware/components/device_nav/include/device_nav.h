@@ -2,56 +2,57 @@
 
 #include "esp_err.h"
 
-// Up/Down button navigation across plugin device-views (fetched from the
-// backend's GET /api/device/views -- see backend/plugins/base.py's
-// DeviceView contract) plus the device's own home/conversation screen.
+// Moves between the device's home screen and the plugin views fetched from the
+// backend's GET /api/device/views (see backend/plugins/base.py's DeviceView
+// contract). Buttons and horizontal swipes change page, wrapping past either
+// end. Vertical swipes scroll the current page. Tapping a row toggles it if
+// it's checkable, or opens its details if it has any.
 //
-// Down moves a highlighted row forward within the current view; past the
-// last row (or in a view with no rows), it advances to the next view,
-// wrapping past the last plugin view back to home. Up mirrors this
-// backward, landing on the *previous* view's *last* row so paging up
-// through content feels continuous rather than jumping to a fixed spot.
-// Tapping a row on the touchscreen highlights it and toggles it if it's
-// checkable. A short press of the AI button toggles the highlighted row too.
-//
-// Network calls (fetching views, posting a toggle) run on this component's own
-// task, so every function here is quick enough for the button and touch tasks.
+// Pages draw from a cached copy of the views and refresh in the background, so
+// changing page doesn't wait on the network. Network calls run on this
+// component's own task, so every function here is quick enough for the button
+// and touch tasks.
 namespace device_nav {
 
 esp_err_t Init();
 
-// Called once after the initial WiFi connect attempt (main.cpp's startup
-// sequence; this project doesn't watch for connectivity changes after
-// that). Used only so device_nav's own ui::ShowIdle() calls (returning
-// home via Up/Down) report accurate status, rather than guessing.
+// Called once after the initial WiFi connect attempt. Used so the home screen
+// reports accurate status.
 void SetWifiConnected(bool connected);
 
-// Plugin views last successfully fetched (not counting home, which isn't
-// fetched -- it's the firmware's own built-in screen), or -1 if nothing
-// has been fetched yet this boot (e.g. before the user has ever pressed
-// Up/Down). Used only to size the home screen's page-position dots;
-// deliberately not fetched proactively just to populate them, since that
-// would mean a network round trip every time the idle screen shows on a
-// battery-powered device that otherwise only talks to the backend when
-// asked to.
+// Fetches the views once at startup and then shows the home screen, so its page
+// indicator is right without paging first.
+void Preload();
+
+// Plugin views last fetched (not counting home, which is the firmware's own
+// screen), or -1 if nothing has been fetched yet this boot.
 int KnownPluginViewCount();
 
-// Called when a real recording starts (a genuine long-press, not a tap),
-// which takes over the screen for the rest of the converse flow -- so the
-// next Up/Down press after that starts fresh from home.
+// While the AI button is down, and for the whole conversation after a real
+// recording, other input is ignored and background refreshes don't draw, so
+// nothing replaces the conversation screens.
+void PauseInput();
+void ResumeInput();
+
+// A recording is going ahead: the next page change starts from home.
 void ResetToHome();
 
-void OnUp();
-void OnDown();
+// The conversation is over and its result is about to go on screen. Resumes
+// input and refreshes the cached views, since Claude may have changed them.
+void FinishConversation();
 
-// Returns true if a device view consumed the tap (toggled a row, and is
-// still showing); false if there was nothing to confirm -- the home
-// screen is showing, or the current view has no checkable row highlighted
-// -- so the caller should fall back to its own idle-screen behavior.
-bool OnConfirm();
+// +1 for the next page, -1 for the previous.
+void Navigate(int direction);
 
-// A tap at screen coordinates. Ignored outside a row, and while the screen is
-// refreshing, since what's on the glass may not match the list yet.
+// +1 towards later content, -1 towards earlier.
+void OnScroll(int direction);
+
+// A tap at screen coordinates. Ignored while the screen is refreshing, since
+// what's on the glass may not match the list yet.
 void OnTap(int x, int y);
+
+// A short press of the AI button: details go back to their list, a plugin view
+// goes home, and home dismisses any reply or error.
+void OnBack();
 
 }  // namespace device_nav
